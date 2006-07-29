@@ -1,6 +1,7 @@
 require 'rcsfile'
 require 'find'
 require 'md5'
+require 'sqlite3'
 
 class RCSFile::Rev
   attr_accessor :file, :syms
@@ -57,33 +58,90 @@ class RCSFile
   end
 end
 
-revs = []
 
-Find.find('/space/cvs/dragonfly/src/sys') do |f|
-  next if File.directory?(f)
+class Repo
+  class Set < Array
+    attr_accessor :id, :author, :date, :branch
 
-  RCSFile.open(f) do |rf|
-    rf.each_value do |rev|
-      rev.file = f
-      rev.syms = rf.branch_syms_of(rev.rev)
-      rev.log = MD5.md5(rf.getlog(rev.rev)).to_s
-      revs.push rev
+    def update_id!
+      @id = MD5.md5
+      self.each do |r|
+	@id << r.file << r.rev
+      end
     end
+  end
+
+  attr_reader :sets
+
+  def initialize(path)
+    @path = path
+  end
+
+  def _normalize_path(f)
+    f = f[@path.length..-1] if f.index(@path) == 0
+    f = f[0..-3] if f[-2..-1] == ',v'
+    fi = File.split(f)
+    fi[0] = File.dirname(fi[0]) if File.basename(fi[0]) == 'Attic'
+    return File.join(fi)
+  end
+
+  def scan!
+    revs = []
+    Find.find(@path) do |f|
+      next if f[-2..-1] != ',v'
+      next if File.directory?(f)
+
+      RCSFile.open(f) do |rf|
+	rf.each_value do |rev|
+	  rev.file = _normalize_path(f)
+	  rev.syms = rf.branch_syms_of(rev.rev)
+	  rev.log = MD5.md5(rf.getlog(rev.rev)).to_s
+	  revs.push rev
+	end
+      end
+    end
+
+    revs.sort!
+
+    @sets = []
+    set = Set.new
+    branches = nil
+    for r in revs
+      if not set.empty? and not set[-1].same_set?(r)
+	set.branch = branches[0] if branches
+	set.author = set[0].author
+	set.date = set[0].date
+	@sets << set
+	set = Set.new
+	branches = nil
+      end
+      set << r
+      if branches
+	branches &= r.syms
+      elsif not r.syms.empty?
+	branches = r.syms.dup
+      end
+    end
+    set.branch = branches[0] if branches
+    set.author = set[0].author
+    set.date = set[0].date
+    @sets << set
+
+    self
   end
 end
 
-revs.sort!
+#SQLite3::Database.open('commitsets.db') do |db|
+  r = Repo.new('/space/cvs/dragonfly/src/sys')
+  r.scan!
 
-set = []
-for r in revs
-  if set.empty? or set[-1].same_set?(r)
-    set << r
-  else
-    puts "commitset by #{set[0].author} at #{set[0].date}:"
-    for sr in set
-      puts "\t#{sr.file} #{sr.rev} #{sr.date} #{sr.syms}"
-    end
-    set = [r]
+  for s in r.sets
+    s.update_id!
+    puts "changeset #{s.id} by #{s.author} at #{s.date}" + \
+      if s.branch
+	" on #{s.branch}"
+      else
+	""
+      end
   end
-  ro = r
-end
+#end
