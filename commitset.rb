@@ -1,7 +1,35 @@
+# == Synopsis
+#
+# commitset: outputs a CVS changeset from a pre-built database
+#
+# == Usage
+#
+# commitset [-hN] [-b path] [-D dbfile] file rev
+#
+# -b path, --build path:
+#    Builds a database from the CVS repo rooted at +path+.
+#
+# -D dbfile, --db dbfile:
+#    Specifies the location of the database, instead of using
+#    +commits.db+ in the current directory.
+#
+# -N, --nodiff:
+#    Just output the files and revisions instead of a complete diff.
+#
+# -h, --help:
+#    This help.
+#
+#
+# commitset will search for the specified +rev+ in +file+ and output a
+# diff spanning all associated files and revisions.
+#
+
 require 'rcsfile'
 require 'find'
 require 'md5'
 require 'sqlite3'
+require 'getoptlong'
+require 'rdoc/usage'
 
 # Fix up SQLite3
 module SQLite3
@@ -79,13 +107,37 @@ end
 
 class Repo
   class Set < Array
-    attr_accessor :id, :author, :date, :branch
+    attr_accessor :id, :author, :date
 
     def update_id!
       @id = MD5.md5
       self.each do |r|
 	@id << r.file << r.rev
       end
+    end
+
+    def <<(rev)
+      super
+
+      if not @branches
+	@branches = rev.branches.dup if not rev.branches.empty?
+      else
+	@branches &= rev.branches
+      end
+      unless @author
+	@author = rev.author
+	@date = rev.date
+      end
+    end
+
+    def push(*args)
+      for a in args
+	self << a
+      end
+    end
+
+    def branch
+      @branches[0] if @branches
     end
   end
 
@@ -123,26 +175,13 @@ class Repo
 
     @sets = []
     set = Set.new
-    branches = nil
     for r in revs
       if not set.empty? and not set[-1].same_set?(r)
-	set.branch = branches[0] if branches
-	set.author = set[0].author
-	set.date = set[0].date
 	@sets << set
 	set = Set.new
-	branches = nil
       end
       set << r
-      if branches
-	branches &= r.syms
-      elsif not r.syms.empty?
-	branches = r.syms.dup
-      end
     end
-    set.branch = branches[0] if branches
-    set.author = set[0].author
-    set.date = set[0].date
     @sets << set
 
     self
@@ -151,8 +190,11 @@ end
 
 
 class Commitset
-  def initialize(dbfile)
-    @db = SQLite3::Database.open('commitsets.db')
+  def initialize(dbfile, create=false)
+    if not create and not File.exists?(dbfile)
+      raise Errno::ENOENT, dbfile
+    end
+    @db = SQLite3::Database.open(dbfile)
     _init_schema
     @path = @db.get_first_value('SELECT path FROM meta LIMIT 1')
   end
@@ -168,7 +210,7 @@ class Commitset
 
       CREATE TABLE IF NOT EXISTS file (
 	file_id INTEGER PRIMARY KEY,
-	name TEXT NOT NULL UNIQUE
+	path TEXT NOT NULL UNIQUE
       );
 
       CREATE TABLE IF NOT EXISTS rev (
@@ -208,14 +250,14 @@ class Commitset
     r = Repo.new(@path)
     r.scan!
 
+    n = 0
     for s in r.sets
+      n += 1
+
       @db.transaction do |tdb|
-	puts "changeset by #{s.author} at #{s.date}" + \
-	  if s.branch
-	    " on #{s.branch}"
-	  else
-	    ""
-	  end
+	if block_given?
+	  yield s, n, r.sets.length
+	end
 
 	tdb.execute('INSERT INTO cset VALUES ( NULL, :branch, :author, :date )',
 		    ':branch' => s.branch,
@@ -224,7 +266,7 @@ class Commitset
 		   )
 	cset_id = tdb.last_insert_row_id
 	for rev in s
-	  fid = tdb.get_first_value('SELECT file_id FROM file WHERE name=?', rev.file)
+	  fid = tdb.get_first_value('SELECT file_id FROM file WHERE path = ?', rev.file)
 	  unless fid
 	    tdb.execute('INSERT INTO file VALUES ( NULL, ? )', rev.file)
 	    fid = tdb.last_insert_row_id
@@ -239,8 +281,71 @@ class Commitset
       end
     end
   end
+
+  def cset(file, rev, diff=true)
+    r = ""
+
+    cset_id, branch, author, date = @db.get_first_row(%{
+      SELECT * FROM cset WHERE cset_id = (
+	SELECT cset_id FROM rev WHERE file_id = (
+	  SELECT file_id FROM file WHERE path = :path
+	) AND rev = :rev
+      )
+    })
+    date = Time.at(date.to_i)
+
+    r += %{Changeset by #{author} #{%{ on #{branch}} if branch} at #{date}\n}
+
+    log = nil
+    rows = @db.execute('SELECT path, rev, nrev FROM rev JOIN file HAVING cset_id = ?',
+		       cset_id)
+    RCSFile.open(File.join(@path, rows[0][0])) do |rf|
+      r += rf.getlog(rev) + "\n"
+    end
+
+    r += '['
+    for path, rev in rows
+      r += %{ #{path} #{rev}}
+    end
+    r += " ]\n"
+  end
 end
 
 
-cs = Commitset.new('commitsets.db')
-cs.build('/space/cvs/dragonfly/src/sys')
+opts = GetoptLong.new(
+  ['--help', '-h', GetoptLong::NO_ARGUMENT],
+  ['--build', '-b', GetoptLong::REQUIRED_ARGUMENT],
+  ['--db', '-D', GetoptLong::REQUIRED_ARGUMENT],
+  ['--nodiff', '-N', GetoptLong::NO_ARGUMENT]
+)
+
+dbfile = 'commits.db'
+dobuild = nil
+diff = true
+opts.each do |opt, arg|
+  case opt
+  when '--help'
+    RDoc::usage
+  when '--build'
+    dobuild = arg
+  when '--db'
+    dbfile = arg
+  when '--nodiff'
+    diff = false
+  end
+end
+
+if dobuild
+  cs = Commitset.new(dbfile, true)
+  cs.build(dobuild) do |s, n, tot|
+    puts %{Commitset #{n}/#{tot} by #{s.author} at #{s.date}}
+  end
+
+  exit 0 if ARGV.length == 0
+end
+
+cs = Commitset.new(dbfile)
+
+if ARGV.length != 2
+  RDoc::usage(1)
+end
