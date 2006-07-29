@@ -152,6 +152,7 @@ class Repo
     f = f[0..-3] if f[-2..-1] == ',v'
     fi = File.split(f)
     fi[0] = File.dirname(fi[0]) if File.basename(fi[0]) == 'Attic'
+    fi.delete_at(0) if fi[0] == '.'
     return File.join(fi)
   end
 
@@ -291,18 +292,25 @@ class Commitset
 	  SELECT file_id FROM file WHERE path = :path
 	) AND rev = :rev
       )
-    })
+    }, ':path' => file, ':rev' => rev)
+    raise RuntimeError, 'File or revision not found' unless cset_id
     date = Time.at(date.to_i)
 
     r += %{Changeset by #{author} #{%{ on #{branch}} if branch} at #{date}\n}
 
     log = nil
-    rows = @db.execute('SELECT path, rev, nrev FROM rev JOIN file WHERE cset_id = ?',
+    rows = @db.execute('SELECT path, rev, nrev FROM rev NATURAL JOIN file WHERE cset_id = ?',
 		       cset_id)
-    raise RuntimeError, 'File or revision not found' unless rows
 
-    RCSFile.open(File.join(@path, rows[0][0])) do |rf|
-      r += rf.getlog(rev) + "\n"
+    rcsf = File.join(@path, rows[0][0]) + ',v'
+    begin
+      RCSFile.open(rcsf) do |rf|
+	r += rf.getlog(rev) + "\n"
+      end
+    rescue Errno::ENOENT
+      pc = File.split(rcsf)
+      pc.insert(-2, 'Attic')
+      rcsf = File.join(pc)
     end
 
     r += '['
