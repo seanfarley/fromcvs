@@ -3,6 +3,24 @@ require 'find'
 require 'md5'
 require 'sqlite3'
 
+# Fix up SQLite3
+module SQLite3
+  class Database
+    def Database.open(*args)
+      db = Database.new(*args)
+      if block_given?
+	begin
+	  yield db
+	ensure
+	  db.close
+	end
+      else
+	return db
+      end
+    end
+  end
+end
+
 class RCSFile::Rev
   attr_accessor :file, :syms
 
@@ -78,7 +96,7 @@ class Repo
   end
 
   def _normalize_path(f)
-    f = f[@path.length..-1] if f.index(@path) == 0
+    f = f[@path.length+1..-1] if f.index(@path) == 0
     f = f[0..-3] if f[-2..-1] == ',v'
     fi = File.split(f)
     fi[0] = File.dirname(fi[0]) if File.basename(fi[0]) == 'Attic'
@@ -131,17 +149,98 @@ class Repo
   end
 end
 
-#SQLite3::Database.open('commitsets.db') do |db|
-  r = Repo.new('/space/cvs/dragonfly/src/sys')
-  r.scan!
 
-  for s in r.sets
-    s.update_id!
-    puts "changeset #{s.id} by #{s.author} at #{s.date}" + \
-      if s.branch
-	" on #{s.branch}"
-      else
-	""
-      end
+class Commitset
+  def initialize(dbfile)
+    @db = SQLite3::Database.open('commitsets.db')
+    _init_schema
+    @path = @db.get_first_value('SELECT path FROM meta LIMIT 1')
   end
-#end
+
+  def _init_schema
+    @db.execute_batch(%{
+      CREATE TABLE IF NOT EXISTS cset (
+	cset_id INTEGER PRIMARY KEY,
+	branch TEXT,
+	author TEXT NOT NULL,
+	date INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS file (
+	file_id INTEGER PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE
+      );
+
+      CREATE TABLE IF NOT EXISTS rev (
+	file_id INTEGER NOT NULL,
+	rev TEXT NOT NULL,
+	nrev TEXT,
+	cset_id INTEGER NOT NULL,
+	PRIMARY KEY ( file_id, rev )
+      );
+
+      CREATE INDEX IF NOT EXISTS rev_cset ON rev ( cset_id );
+
+      CREATE TABLE IF NOT EXISTS meta (
+	path TEXT NOT NULL
+      );
+
+      -- make SQLite3 happy, it checks something it shouldn't
+      -- so give it a result to chew on.
+      SELECT 1;
+    })
+  end
+
+  def build(path)
+    @db.execute_batch(%{
+      DROP TABLE cset;
+      DROP TABLE file;
+      DROP INDEX rev_cset;
+      DROP TABLE rev;
+      DROP TABLE meta;
+
+      SELECT 1;
+    })
+    _init_schema
+    @db.execute('INSERT INTO meta VALUES ( ? )', path)
+    @path = path
+
+    r = Repo.new(@path)
+    r.scan!
+
+    for s in r.sets
+      @db.transaction do |tdb|
+	puts "changeset by #{s.author} at #{s.date}" + \
+	  if s.branch
+	    " on #{s.branch}"
+	  else
+	    ""
+	  end
+
+	tdb.execute('INSERT INTO cset VALUES ( NULL, :branch, :author, :date )',
+		    ':branch' => s.branch,
+		    ':author' => s.author,
+		    ':date' => s.date.to_i
+		   )
+	cset_id = tdb.last_insert_row_id
+	for rev in s
+	  fid = tdb.get_first_value('SELECT file_id FROM file WHERE name=?', rev.file)
+	  unless fid
+	    tdb.execute('INSERT INTO file VALUES ( NULL, ? )', rev.file)
+	    fid = tdb.last_insert_row_id
+	  end
+	  tdb.execute('INSERT INTO rev VALUES ( :fid, :rev, :nrev, :cset_id )',
+		      ':fid' => fid,
+		      ':rev' => rev.rev,
+		      ':nrev' => rev.next,
+		      ':cset_id' => cset_id
+		     )
+	end
+      end
+    end
+  end
+end
+
+
+cs = Commitset.new('commitsets.db')
+cs.build('/space/cvs/dragonfly/src/sys')
