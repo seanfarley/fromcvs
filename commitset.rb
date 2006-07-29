@@ -7,30 +7,26 @@ class RCSFile::Rev
 
   # we sort revs on branch, author, log, date
   def <=>(rhs)
-    r = 0
-    if (@syms & rhs.syms).empty?
-      r = @syms <=> rhs.syms
-    end
-
-    for type in [:@author, :@log, :@date]
-      return r if r != 0
-      r = self.instance_variable_get(type) <=> rhs.instance_variable_get(type)
-    end
-    return r
+    _cmp(rhs) <=> 0
   end
 
-  def same_set?(rhs)
+  def _cmp(rhs)
     r = 0
     if (@syms & rhs.syms).empty?
       r = @syms <=> rhs.syms
     end
 
     for type in [:@author, :@log]
-      return false if r != 0
+      # scale the res so it doesn't collide with time diffs
+      return r * 1000 if r != 0
       r = self.instance_variable_get(type) <=> rhs.instance_variable_get(type)
     end
 
-    return (@date - rhs.date).abs < 180
+    @date - rhs.date
+  end
+
+  def same_set?(rhs)
+    _cmp(rhs).abs < 180
   end
 end
 
