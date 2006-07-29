@@ -297,8 +297,10 @@ class Commitset
     r += %{Changeset by #{author} #{%{ on #{branch}} if branch} at #{date}\n}
 
     log = nil
-    rows = @db.execute('SELECT path, rev, nrev FROM rev JOIN file HAVING cset_id = ?',
+    rows = @db.execute('SELECT path, rev, nrev FROM rev JOIN file WHERE cset_id = ?',
 		       cset_id)
+    raise RuntimeError, 'File or revision not found' unless rows
+
     RCSFile.open(File.join(@path, rows[0][0])) do |rf|
       r += rf.getlog(rev) + "\n"
     end
@@ -349,3 +351,5 @@ cs = Commitset.new(dbfile)
 if ARGV.length != 2
   RDoc::usage(1)
 end
+
+puts cs.cset(*ARGV)
