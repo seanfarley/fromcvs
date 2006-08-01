@@ -146,7 +146,7 @@ class Repo
   attr_reader :sets
 
   def initialize(path)
-    @path = path
+    @path = path.chomp(File::SEPARATOR)
   end
 
   def _normalize_path(f)
