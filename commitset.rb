@@ -429,6 +429,29 @@ class Commitset
       r += %{ #{path}:#{rev}}
     end
     r += " ]\n"
+
+    return r unless diff
+
+    for path, rev, nrev in rows
+      IO.popen('-') do |p|
+	unless p
+	  # child
+	  path = File.join(@path, path) + ',v'
+	  if not File.exists?(path)
+	    pparts = File.split(path)
+	    path = File.join(pparts[0], 'Attic', pparts[1])
+	  end
+	  # rcsdiff uses stderr to output the diff headers, so route it to stdout
+	  $stderr.reopen($stdout)
+	  exec 'rcsdiff', '-kb', "-r#{nrev}", "-r#{rev}", '-up', path
+	else
+	  # parent
+	  r += p.readlines.join
+	end
+      end
+    end
+
+    return r
   end
 end
 
