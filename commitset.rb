@@ -155,15 +155,22 @@ class Repo
     return File.join(fi)
   end
 
-  def scan!
+  def scan
     # at the expense of some cpu we normalize strings through this
     # hash so that each distinct string only is present one time.
     norm_h = {}
 
-    revs = []
+    lastdir = nil
+    @revs = []
     Find.find(@path) do |f|
       next if f[-2..-1] != ',v'
       next if File.directory?(f)
+
+      dir = File.dirname(f)
+      if dir != lastdir
+	yield dir if block_given?
+	lastdir = dir
+      end
 
       brevs = []
       rh = {}
@@ -184,7 +191,7 @@ class Repo
 	  else
 	    rev.branches = nil
 	  end
-	  revs.push rev
+	  @revs.push rev
 	  rh[rev.rev] = rev
 	end
       end
@@ -205,11 +212,17 @@ class Repo
       end
     end
 
-    revs.sort!
+    self
+  end
 
+  def aggregate
+    yield "Sorting..." if block_given?
+    @revs.sort!
+
+    yield "Aggregating..." if block_given?
     @sets = []
     set = Set.new
-    for r in revs
+    for r in @revs
       if not set.empty? and not set[-1].same_set?(r)
 	@sets << set
 	set = Set.new
@@ -217,6 +230,8 @@ class Repo
       set << r
     end
     @sets << set
+
+    @revs = nil
 
     self
   end
@@ -282,7 +297,8 @@ class Commitset
     @path = path
 
     r = Repo.new(@path)
-    r.scan!
+    r.scan {|s| yield s if block_given? }
+    r.aggregate {|s| yield s if block_given? }
 
     n = 0
     for s in r.sets
@@ -290,7 +306,7 @@ class Commitset
 
       @db.transaction do |tdb|
 	if block_given?
-	  yield s, n, r.sets.length
+	  yield "#{n}/#{r.sets.length} " + _chsetstr(s.author, s.branch, s.date)
 	end
 
 	tdb.execute('INSERT INTO cset VALUES ( NULL, :branch, :author, :date )',
@@ -316,6 +332,10 @@ class Commitset
     end
   end
 
+  def _chsetstr(author, branch, date)
+    %{Changeset by #{author}#{%{ on #{branch}} if branch} at #{date}}
+  end
+
   def cset(file, rev, diff=true)
     r = ""
 
@@ -329,7 +349,7 @@ class Commitset
     raise RuntimeError, 'File or revision not found' unless cset_id
     date = Time.at(date.to_i)
 
-    r += %{Changeset by #{author}#{%{ on #{branch}} if branch} at #{date}\n}
+    r += _chsetstr(author, branch, date) + "\n"
 
     rcsf = File.join(@path, file) + ',v'
     begin
@@ -379,8 +399,8 @@ end
 
 if dobuild
   cs = Commitset.new(dbfile, true)
-  cs.build(dobuild) do |s, n, tot|
-    puts %{Commitset #{n}/#{tot} by #{s.author} at #{s.date}}
+  cs.build(dobuild) do |state|
+    puts "#{state}"
   end
 
   exit 0 if ARGV.length == 0
