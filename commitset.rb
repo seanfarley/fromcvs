@@ -433,14 +433,31 @@ class Commitset
     return r unless diff
 
     for path, rev, nrev in rows
+      path = File.join(@path, path) + ',v'
+      if not File.exists?(path)
+	pparts = File.split(path)
+	path = File.join(pparts[0], 'Attic', pparts[1])
+      end
+
+      # rcsdiff can't output diffs for the first rev (1.1)
+      # so we have to do so instead.
+      if not nrev
+	RCSFile.open(path) do |rf|
+	  rl = rf.checkout(rev).split("\n")
+	  r += '='*67 + "\n"
+	  r += "RCS file: #{path}\n"
+	  r += "diff -N #{path}\n"
+	  r += "--- /dev/null\t#{Time.at(0)}\n"
+	  r += "+++ #{File.basename(path)}\t#{date}\t#{rev}\n"
+	  r += "@@ -0,0 +1,#{rl.length} @@\n"
+	  r += "+" + rl.join("\n+") + "\n"
+	end
+	next
+      end
+
       IO.popen('-') do |p|
 	unless p
 	  # child
-	  path = File.join(@path, path) + ',v'
-	  if not File.exists?(path)
-	    pparts = File.split(path)
-	    path = File.join(pparts[0], 'Attic', pparts[1])
-	  end
 	  # rcsdiff uses stderr to output the diff headers, so route it to stdout
 	  $stderr.reopen($stdout)
 	  exec 'rcsdiff', '-kb', "-r#{nrev}", "-r#{rev}", '-up', path
