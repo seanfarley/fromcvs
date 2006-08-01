@@ -50,7 +50,7 @@ module SQLite3
 end
 
 class RCSFile::Rev
-  attr_accessor :file, :syms
+  attr_accessor :file, :syms, :author, :branches, :state, :rev, :next
 
   # we sort revs on branch, author, log, date
   def <=>(rhs)
@@ -119,10 +119,9 @@ class Repo
     def <<(rev)
       super
 
-      if not @branches
-	@branches = rev.branches.dup if not rev.branches.empty?
-      else
-	@branches &= rev.branches
+      if rev.syms
+	@branches ||= rev.syms
+	@branches &= rev.syms
       end
       unless @author
 	@author = rev.author
@@ -157,18 +156,52 @@ class Repo
   end
 
   def scan!
+    # at the expense of some cpu we normalize strings through this
+    # hash so that each distinct string only is present one time.
+    norm_h = {}
+
     revs = []
     Find.find(@path) do |f|
       next if f[-2..-1] != ',v'
       next if File.directory?(f)
 
+      brevs = []
+      rh = {}
+      nf = _normalize_path(f)
       RCSFile.open(f) do |rf|
 	rf.each_value do |rev|
-	  rev.file = _normalize_path(f)
-	  rev.syms = rf.branch_syms_of(rev.rev)
-	  rev.log = MD5.md5(rf.getlog(rev.rev)).to_s
+	  rev.file = nf
+	  rev.syms = rf.branch_syms_of(rev.rev).collect! {|s| norm_h[s] ||= s }
+	  rev.log = MD5.md5(rf.getlog(rev.rev)).digest
+	  rev.author = norm_h[rev.author] ||= rev.author
+	  rev.rev = norm_h[rev.rev] ||= rev.rev
+	  rev.next = norm_h[rev.next] ||= rev.next
+	  rev.state = nil
+	  # we need to record branch starts so that we can generate
+	  # the correct "inverse" next pointer for a later cvs diff
+	  if not rev.branches.empty?
+	    brevs << rev
+	  else
+	    rev.branches = nil
+	  end
 	  revs.push rev
+	  rh[rev.rev] = rev
 	end
+      end
+
+      # correct the next pointers
+      for br in brevs
+	for rev in br.branches
+	  pr = br
+	  begin
+	    rev = rh[rev]
+	    nrev = rev.next
+	    rev.next = pr.rev
+	    pr = rev
+	    rev = nrev
+	  end while rev
+	end
+	br.branches = nil
       end
     end
 
@@ -296,13 +329,9 @@ class Commitset
     raise RuntimeError, 'File or revision not found' unless cset_id
     date = Time.at(date.to_i)
 
-    r += %{Changeset by #{author} #{%{ on #{branch}} if branch} at #{date}\n}
+    r += %{Changeset by #{author}#{%{ on #{branch}} if branch} at #{date}\n}
 
-    log = nil
-    rows = @db.execute('SELECT path, rev, nrev FROM rev NATURAL JOIN file WHERE cset_id = ?',
-		       cset_id)
-
-    rcsf = File.join(@path, rows[0][0]) + ',v'
+    rcsf = File.join(@path, file) + ',v'
     begin
       RCSFile.open(rcsf) do |rf|
 	r += rf.getlog(rev) + "\n"
@@ -311,11 +340,14 @@ class Commitset
       pc = File.split(rcsf)
       pc.insert(-2, 'Attic')
       rcsf = File.join(pc)
+      retry
     end
 
+    rows = @db.execute('SELECT path, rev, nrev FROM rev NATURAL JOIN file WHERE cset_id = ?',
+		       cset_id)
     r += '['
     for path, rev in rows
-      r += %{ #{path} #{rev}}
+      r += %{ #{path}:#{rev}}
     end
     r += " ]\n"
   end
