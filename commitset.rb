@@ -4,9 +4,12 @@
 #
 # == Usage
 #
-# commitset [-hN] [-b path] [-D dbfile] file rev
+# commitset [-bhN] [-B path] [-D dbfile] file rev
 #
-# -b path, --build path:
+# -b, --build-incr:
+#    Incrementally updates the database.
+#
+# -B path, --build-new path:
 #    Builds a database from the CVS repo rooted at +path+.
 #
 # -D dbfile, --db dbfile:
@@ -155,7 +158,7 @@ class Repo
     return File.join(fi)
   end
 
-  def scan
+  def scan(from_date=Time.at(0))
     # at the expense of some cpu we normalize strings through this
     # hash so that each distinct string only is present one time.
     norm_h = {}
@@ -172,18 +175,13 @@ class Repo
 	lastdir = dir
       end
 
+      next if File.mtime(f) < from_date
+
       brevs = []
       rh = {}
       nf = _normalize_path(f)
       RCSFile.open(f) do |rf|
 	rf.each_value do |rev|
-	  rev.file = nf
-	  rev.syms = rf.branch_syms_of(rev.rev).collect! {|s| norm_h[s] ||= s }
-	  rev.log = MD5.md5(rf.getlog(rev.rev)).digest
-	  rev.author = norm_h[rev.author] ||= rev.author
-	  rev.rev = norm_h[rev.rev] ||= rev.rev
-	  rev.next = norm_h[rev.next] ||= rev.next
-	  rev.state = nil
 	  # we need to record branch starts so that we can generate
 	  # the correct "inverse" next pointer for a later cvs diff
 	  if not rev.branches.empty?
@@ -191,8 +189,20 @@ class Repo
 	  else
 	    rev.branches = nil
 	  end
-	  @revs.push rev
 	  rh[rev.rev] = rev
+
+	  # for old revs we don't need to pimp up the fields
+	  # because we will drop it soon anyways
+	  next if rev.date < from_date
+
+	  rev.file = nf
+	  rev.syms = rf.branch_syms_of(rev.rev).collect! {|s| norm_h[s] ||= s }
+	  rev.log = MD5.md5(rf.getlog(rev.rev)).digest
+	  rev.author = norm_h[rev.author] ||= rev.author
+	  rev.rev = norm_h[rev.rev] ||= rev.rev
+	  rev.next = norm_h[rev.next] ||= rev.next
+	  rev.state = nil
+	  @revs << rev
 	end
       end
 
@@ -229,7 +239,8 @@ class Repo
       end
       set << r
     end
-    @sets << set
+    @sets << set if set.author
+    @sets.sort! {|a, b| a.date <=> b.date }
 
     @revs = nil
 
@@ -244,8 +255,9 @@ class Commitset
       raise Errno::ENOENT, dbfile
     end
     @db = SQLite3::Database.open(dbfile)
-    _init_schema
-    @path = @db.get_first_value('SELECT path FROM meta LIMIT 1')
+    if not create
+      @path = @db.get_first_value('SELECT value FROM meta WHERE key = "path"')
+    end
   end
 
   def _init_schema
@@ -273,7 +285,8 @@ class Commitset
       CREATE INDEX IF NOT EXISTS rev_cset ON rev ( cset_id );
 
       CREATE TABLE IF NOT EXISTS meta (
-	path TEXT NOT NULL
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL
       );
 
       -- make SQLite3 happy, it checks something it shouldn't
@@ -282,53 +295,99 @@ class Commitset
     })
   end
 
-  def build(path)
-    @db.execute_batch(%{
-      DROP TABLE cset;
-      DROP TABLE file;
-      DROP INDEX rev_cset;
-      DROP TABLE rev;
-      DROP TABLE meta;
+  def build(rebuild)
+    if (rebuild)
+      @db.execute_batch(%{
+	DROP TABLE IF EXISTS cset;
+	DROP TABLE IF EXISTS file;
+	DROP INDEX IF EXISTS rev_cset;
+	DROP TABLE IF EXISTS rev;
+	DROP TABLE IF EXISTS meta;
 
-      SELECT 1;
-    })
-    _init_schema
-    @db.execute('INSERT INTO meta VALUES ( ? )', path)
-    @path = path
+	SELECT 1;
+      })
+      _init_schema
+      @db.execute('INSERT INTO meta VALUES ( "path", ? )', rebuild)
+      @path = rebuild
+      from_date = Time.at(0)
+    else
+      from_date = @db.get_first_value('SELECT date, cset_id FROM cset 
+				         ORDER BY cset_id DESC LIMIT 1')
+      from_date = Time.at(from_date.to_i)
+    end
 
     r = Repo.new(@path)
-    r.scan {|s| yield s if block_given? }
+    r.scan(from_date) {|s| yield s if block_given? }
     r.aggregate {|s| yield s if block_given? }
 
-    n = 0
-    for s in r.sets
-      n += 1
+    # we might be operating incrementally and multiple changesets
+    # have the same date.  Strip away the ones we already committed.
+    while not r.sets.empty?
+      s = r.sets[0]
+      if s.branch and @db.get_first_value(
+	    %{SELECT cset_id FROM cset WHERE
+		branch = :branch AND
+		author = :author AND
+		date = :date
+	     }, ':branch' => s.branch,
+		':author' => s.author,
+		':date' => s.date.to_i
+	  ) or @db.get_first_value(
+	    %{SELECT cset_id FROM cset WHERE
+		branch IS NULL AND
+		author = :author AND
+		date = :date
+	     }, ':author' => s.author,
+		':date' => s.date.to_i
+	  ) then
+	r.sets.delete_at(0)
+      else
+	break
+      end
+    end
 
-      @db.transaction do |tdb|
+    begin
+      @db.transaction
+
+      n = 0
+      ls = r.sets[0] if not r.sets.empty?
+      for s in r.sets
+	# To handle date issues, we only flush the database in periods of silence
+	if ls[-1].date < s.date
+	  @db.commit
+	  @db.transaction
+	end
+	ls = s
+
 	if block_given?
+	  n += 1
 	  yield "#{n}/#{r.sets.length} " + _chsetstr(s.author, s.branch, s.date)
 	end
 
-	tdb.execute('INSERT INTO cset VALUES ( NULL, :branch, :author, :date )',
+	@db.execute('INSERT INTO cset VALUES ( NULL, :branch, :author, :date )',
 		    ':branch' => s.branch,
 		    ':author' => s.author,
 		    ':date' => s.date.to_i
 		   )
-	cset_id = tdb.last_insert_row_id
+	cset_id = @db.last_insert_row_id
 	for rev in s
-	  fid = tdb.get_first_value('SELECT file_id FROM file WHERE path = ?', rev.file)
+	  fid = @db.get_first_value('SELECT file_id FROM file WHERE path = ?', rev.file)
 	  unless fid
-	    tdb.execute('INSERT INTO file VALUES ( NULL, ? )', rev.file)
-	    fid = tdb.last_insert_row_id
+	    @db.execute('INSERT INTO file VALUES ( NULL, ? )', rev.file)
+	    fid = @db.last_insert_row_id
 	  end
-	  tdb.execute('INSERT INTO rev VALUES ( :fid, :rev, :nrev, :cset_id )',
+	  @db.execute('INSERT INTO rev VALUES ( :fid, :rev, :nrev, :cset_id )',
 		      ':fid' => fid,
 		      ':rev' => rev.rev,
 		      ':nrev' => rev.next,
 		      ':cset_id' => cset_id
 		     )
 	end
+	
       end
+      @db.commit
+    rescue
+      @db.rollback
     end
   end
 
@@ -376,20 +435,23 @@ end
 
 opts = GetoptLong.new(
   ['--help', '-h', GetoptLong::NO_ARGUMENT],
-  ['--build', '-b', GetoptLong::REQUIRED_ARGUMENT],
+  ['--build-incr', '-b', GetoptLong::NO_ARGUMENT],
+  ['--build-new', '-B', GetoptLong::REQUIRED_ARGUMENT],
   ['--db', '-D', GetoptLong::REQUIRED_ARGUMENT],
   ['--nodiff', '-N', GetoptLong::NO_ARGUMENT]
 )
 
 dbfile = 'commits.db'
-dobuild = nil
+dobuild = false
+rebuild = nil
 diff = true
 opts.each do |opt, arg|
   case opt
   when '--help'
     RDoc::usage
-  when '--build'
-    dobuild = arg
+  when '--build-incr', '--build-new'
+    dobuild = true
+    rebuild = arg if opt == '--build-new'
   when '--db'
     dbfile = arg
   when '--nodiff'
@@ -398,8 +460,8 @@ opts.each do |opt, arg|
 end
 
 if dobuild
-  cs = Commitset.new(dbfile, true)
-  cs.build(dobuild) do |state|
+  cs = Commitset.new(dbfile, rebuild)
+  cs.build(rebuild) do |state|
     puts "#{state}"
   end
 
