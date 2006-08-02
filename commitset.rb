@@ -1,38 +1,7 @@
-# == Synopsis
-#
-# commitset: outputs a CVS changeset from a pre-built database
-#
-# == Usage
-#
-# commitset [-bhN] [-B path] [-D dbfile] file rev
-#
-# -b, --build-incr:
-#    Incrementally updates the database.
-#
-# -B path, --build-new path:
-#    Builds a database from the CVS repo rooted at +path+.
-#
-# -D dbfile, --db dbfile:
-#    Specifies the location of the database, instead of using
-#    +commits.db+ in the current directory.
-#
-# -N, --nodiff:
-#    Just output the files and revisions instead of a complete diff.
-#
-# -h, --help:
-#    This help.
-#
-#
-# commitset will search for the specified +rev+ in +file+ and output a
-# diff spanning all associated files and revisions.
-#
-
 require 'rcsfile'
 require 'find'
 require 'md5'
 require 'sqlite3'
-require 'getoptlong'
-require 'rdoc/usage'
 
 # Fix up SQLite3
 module SQLite3
@@ -396,8 +365,6 @@ class Commitset
   end
 
   def cset(file, rev, diff=true)
-    r = ""
-
     cset_id, branch, author, date = @db.get_first_row(%{
       SELECT * FROM cset WHERE cset_id = (
 	SELECT cset_id FROM rev WHERE file_id = (
@@ -408,12 +375,12 @@ class Commitset
     raise RuntimeError, 'File or revision not found' unless cset_id
     date = Time.at(date.to_i)
 
-    r += _chsetstr(author, branch, date) + "\n"
+    puts _chsetstr(author, branch, date)
 
     rcsf = File.join(@path, file) + ',v'
     begin
       RCSFile.open(rcsf) do |rf|
-	r += rf.getlog(rev) + "\n"
+	puts rf.getlog(rev)
       end
     rescue Errno::ENOENT
       pc = File.split(rcsf)
@@ -424,13 +391,13 @@ class Commitset
 
     rows = @db.execute('SELECT path, rev, nrev FROM rev NATURAL JOIN file WHERE cset_id = ?',
 		       cset_id)
-    r += '['
+    print '['
     for path, rev in rows
-      r += %{ #{path}:#{rev}}
+      print %{ #{path}:#{rev}}
     end
-    r += " ]\n"
+    puts ' ]'
 
-    return r unless diff
+    return unless diff
 
     for path, rev, nrev in rows
       path = File.join(@path, path) + ',v'
@@ -444,74 +411,29 @@ class Commitset
       if not nrev
 	RCSFile.open(path) do |rf|
 	  rl = rf.checkout(rev).split("\n")
-	  r += '='*67 + "\n"
-	  r += "RCS file: #{path}\n"
-	  r += "diff -N #{path}\n"
-	  r += "--- /dev/null\t#{Time.at(0)}\n"
-	  r += "+++ #{File.basename(path)}\t#{date}\t#{rev}\n"
-	  r += "@@ -0,0 +1,#{rl.length} @@\n"
-	  r += "+" + rl.join("\n+") + "\n"
+	  puts <<END
+===================================================================
+RCS file: #{path}
+diff -N #{path}
+--- /dev/null\t#{Time.at(0)}
++++ #{File.basename(path)}\t#{date}\t#{rev}
+@@ -0,0 +1,#{rl.length} @@
+END
+	  puts '+' + rl.join("\n+")
 	end
 	next
       end
 
-      IO.popen('-') do |p|
-	unless p
-	  # child
-	  # rcsdiff uses stderr to output the diff headers, so route it to stdout
-	  $stderr.reopen($stdout)
-	  exec 'rcsdiff', '-kb', "-r#{nrev}", "-r#{rev}", '-up', path
-	else
-	  # parent
-	  r += p.readlines.join
-	end
+      fork do
+	# child
+	# rcsdiff uses stderr to output the diff headers, so route it to stdout
+	$stderr.reopen($stdout)
+	exec 'rcsdiff', '-kb', "-r#{nrev}", "-r#{rev}", '-up', path
+	raise StandardError, 'could not run rcsdiff'
       end
+      Process.wait
     end
 
-    return r
+    nil
   end
 end
-
-
-opts = GetoptLong.new(
-  ['--help', '-h', GetoptLong::NO_ARGUMENT],
-  ['--build-incr', '-b', GetoptLong::NO_ARGUMENT],
-  ['--build-new', '-B', GetoptLong::REQUIRED_ARGUMENT],
-  ['--db', '-D', GetoptLong::REQUIRED_ARGUMENT],
-  ['--nodiff', '-N', GetoptLong::NO_ARGUMENT]
-)
-
-dbfile = 'commits.db'
-dobuild = false
-rebuild = nil
-diff = true
-opts.each do |opt, arg|
-  case opt
-  when '--help'
-    RDoc::usage
-  when '--build-incr', '--build-new'
-    dobuild = true
-    rebuild = arg if opt == '--build-new'
-  when '--db'
-    dbfile = arg
-  when '--nodiff'
-    diff = false
-  end
-end
-
-if dobuild
-  cs = Commitset.new(dbfile, rebuild)
-  cs.build(rebuild) do |state|
-    puts "#{state}"
-  end
-
-  exit 0 if ARGV.length == 0
-end
-
-cs = Commitset.new(dbfile)
-
-if ARGV.length != 2
-  RDoc::usage(1)
-end
-
-puts cs.cset(*ARGV)
