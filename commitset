@@ -75,4 +75,4 @@ if ARGV.length != 2
   RDoc::usage(1)
 end
 
-puts cs.cset(*ARGV)
+cs.cset(*ARGV)
