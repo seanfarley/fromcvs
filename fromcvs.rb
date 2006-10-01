@@ -1,6 +1,7 @@
 require 'rcsfile'
 require 'find'
 require 'md5'
+require 'rbtree'
 
 
 class RCSFile::Rev
@@ -13,15 +14,30 @@ class RCSFile::Rev
   end
 
   def _cmp(rhs)
+    ls = @syms
+    rs = rhs.syms
+
     r = 0
-    if (@syms & rhs.syms).empty?
-      r = @syms <=> rhs.syms
-      return r * 1000 if r != 0
+    if ls && rs
+      if ls & rs
+        r = 0
+      else
+        r = ls <=> rs
+      end
+    else
+      if ls
+        r = 1
+      elsif rs
+        r = -1
+      end
     end
+    return r * 1000 if r != 0
 
     for type in [:@author, :@log]
+      ls = self.instance_variable_get(type)
+      rs = rhs.instance_variable_get(type)
+      r = ls <=> rs
       # scale the res so it doesn't collide with time diffs
-      r = self.instance_variable_get(type) <=> rhs.instance_variable_get(type)
       return r * 1000 if r != 0
     end
 
@@ -41,44 +57,20 @@ class RCSFile::Rev
   end
 end
 
-class RCSFile
-  def branch_syms_of(rev)
-    if not @sym_rev
-      # We reverse the branches hash
-      # but as there might be more than one tag
-      # pointing to the same branch, we have to
-      # create value arrays.
-      # At the same time we ignore any non-branch tag
-      @sym_rev = {}
-      self.symbols.each_pair do |k, v|
-	f = v.split('.')
-	f.delete_at(-2) if f[-2] == '0'
-	next unless f.length % 2 == 1
-	@sym_rev[f] ||= []
-	@sym_rev[f].push(k).sort!
-      end
-    end
-
-    branch = rev.split('.')[0..-2]
-    return @sym_rev[branch] || []
-  end
-end
-
 
 class Repo
   class Set < Array
-    attr_accessor :author, :date, :ignore, :branch_from
+    attr_accessor :author, :date, :ignore, :branch_from, :branch
 
     def extract_data
       @author = self[0].author
       @date = self[0].date
+      @branch = self[0].syms
       @ignore = true
 
       bl = -1
 
       each do |rev|
-	@branches ||= rev.syms
-	@branches &= rev.syms
         if rev.branch_level > bl
           @branch_from = rev.branch_from
         end
@@ -86,10 +78,6 @@ class Repo
       end
 
       sort! {|a,b| a.file <=> b.file}
-    end
-
-    def branch
-      @branches[0] if @branches
     end
   end
 
@@ -113,10 +101,11 @@ class Repo
     # at the expense of some cpu we normalize strings through this
     # hash so that each distinct string only is present one time.
     norm_h = {}
-    the_one_and_only_empty_list = [].freeze
+
+    @sym_aliases = Hash.new {|h, k| h[k] = [k]}
 
     lastdir = nil
-    @revs = []
+    @revs = MultiRBTree.new
     Find.find(@path) do |f|
       next if f[-2..-1] != ',v'
       next if File.directory?(f)
@@ -129,20 +118,26 @@ class Repo
 
       next if File.mtime(f) < from_date
 
-      brevs = []
       rh = {}
       nf = _normalize_path(f)
       RCSFile.open(f) do |rf|
         trunkrev = nil    # "rev 1.2", when the vendor branch was overwritten
 
+        # We reverse the branches hash
+        # but as there might be more than one tag
+        # pointing to the same branch, we have to
+        # create value arrays.
+        # At the same time we ignore any non-branch tag
+        sym_rev = {}
+        rf.symbols.each_pair do |k, v|
+          f = v.split('.')
+          f.delete_at(-2) if f[-2] == '0'
+          next unless f.length % 2 == 1
+          sym_rev[f] ||= []
+          sym_rev[f].push(norm_h[k] ||= k).sort!
+        end
+
 	rf.each_value do |rev|
-	  # we need to record branch starts so that we can generate
-	  # the correct "inverse" next pointer for a later cvs diff
-	  if not rev.branches.empty?
-	    brevs << rev
-	  else
-	    rev.branches = the_one_and_only_empty_list
-	  end
 	  rh[rev.rev] = rev
 
 	  # for old revs we don't need to pimp up the fields
@@ -151,9 +146,8 @@ class Repo
 
 	  rev.file = nf
           if rev.branch_level > 0
-            rev.syms = rf.branch_syms_of(rev.rev).collect! {|s| norm_h[s] ||= s }
-          else
-            rev.syms = the_one_and_only_empty_list
+            branch = rev.rev.split('.')[0..-2]
+            rev.syms = sym_rev[branch]
           end
 	  rev.log = MD5.md5(rf.getlog(rev.rev)).digest
 	  rev.author = norm_h[rev.author] ||= rev.author
@@ -198,8 +192,8 @@ class Repo
           end
 
           # some imports are without vendor symbol.  just fake one up then
-          vendor_sym = []
-          if rf.branch_syms_of('1.1.1.1').empty?
+          vendor_sym = nil
+          if not sym_rev[['1','1','1']]
             vendor_sym = ['FIX_VENDOR']
           end
 
@@ -212,7 +206,9 @@ class Repo
             else
               rev.action = :vendor
             end
-            rev.syms += vendor_sym
+            if vendor_sym
+            rev.syms ||= vendor_sym
+            end
             rev = rh[rev.next]
           end
 
@@ -259,7 +255,7 @@ class Repo
         rh.each_value do |rev|
           if rev.branch_level > 0
             # if it misses a name, ignore
-            if rev.syms.empty?
+            if not rev.syms
               rev.action = :ignore
             else
               if rev.branch_level == 1
@@ -273,7 +269,7 @@ class Repo
                   rev.branch_from = :TRUNK
                 else
                   br = rh[br.join('.')]
-                  rev.branch_from = br.syms[0]
+                  rev.branch_from = br.syms
                 end
               end
             end
@@ -299,7 +295,7 @@ class Repo
 
         rh.delete_if { |k, rev| rev.date < from_date }
 
-        @revs += rh.values
+        rh.each_value {|r| @revs[r] = r}
       end
     end
 
@@ -307,13 +303,10 @@ class Repo
   end
 
   def aggregate
-    @status.call("Sorting...")
-    @revs.sort!
-
     @status.call("Aggregating...")
     @sets = []
     set = Set.new
-    for r in @revs
+    @revs.each_key do |r|
       if not set.empty? and not set[-1].same_set?(r)
         set.extract_data
 	@sets << set
@@ -351,7 +344,11 @@ if $0 == __FILE__
       print " ignore"
     end
     print "\n"
-    s.each {|r| puts "\t#{r.file} #{r.rev} #{r.state} #{r.action} #{r.syms.join(',')}"}
+    s.each do |r|
+      print "\t#{r.file} #{r.rev} #{r.state} #{r.action}"
+      print " " + r.syms.join(',') if r.syms
+      print "\n"
+    end
   end
 
   puts "#{repo.sets.length} sets"
