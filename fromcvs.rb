@@ -233,10 +233,10 @@ class Repo
           level = 1
           loop do
             brrev = brsplit[0..(2 * level)]
-            rev = rev.branches.find {|b| b.rev.split('.')[0..(2 * level)] == brrev}
+            rev = rev.branches.find {|b| b.split('.')[0..(2 * level)] == brrev}
             rev = rh[rev]
 
-            break if brrev == rf.branch
+            break if brrev.join('.') == rf.branch
 
             brrev = brsplit[0..(2 * level + 1)].join('.')
             while rev.rev != brrev
