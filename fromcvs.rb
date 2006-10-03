@@ -4,49 +4,59 @@ require 'md5'
 require 'rbtree'
 
 
+module RevSort
+  attr_accessor :max_date
+
+  # we sort revs on branch, author, log, date
+  def <=>(rhs)
+    r = _cmp(rhs)
+    return r if r != 0
+
+    def cmp_dates(d, l, h)
+      l -= 180
+      h += 180
+      if d.between?(l, h)
+        return 0
+      else
+        return d - l
+      end
+    end
+
+    if @max_date
+      return - cmp_dates(rhs.date, @date, @max_date)
+    else
+      return cmp_dates(@date, rhs.date, rhs.max_date || rhs.date)
+    end
+  end
+
+  def _cmp(rhs)
+    ls = @log
+    rs = rhs.log
+    r = ls <=> rs
+    return r if r != 0
+
+    ls = @author
+    rs = rhs.author
+    r = ls <=> rs
+    return r if r != 0
+
+    ls = @syms
+    rs = rhs.syms
+
+    if !ls && !rs || (ls or []) & (rs or [])
+      r = 0
+    else
+      r = (ls or []) <=> (rs or [])
+    end
+    r
+  end
+end
+
 class RCSFile::Rev
   attr_accessor :file, :syms, :author, :branches, :state, :rev, :next
   attr_accessor :action, :link, :branch_from
 
-  # we sort revs on branch, author, log, date
-  def <=>(rhs)
-    _cmp(rhs) <=> 0
-  end
-
-  def _cmp(rhs)
-    ls = @syms
-    rs = rhs.syms
-
-    r = 0
-    if ls && rs
-      if ls & rs
-        r = 0
-      else
-        r = ls <=> rs
-      end
-    else
-      if ls
-        r = 1
-      elsif rs
-        r = -1
-      end
-    end
-    return r * 1000 if r != 0
-
-    for type in [:@author, :@log]
-      ls = self.instance_variable_get(type)
-      rs = rhs.instance_variable_get(type)
-      r = ls <=> rs
-      # scale the res so it doesn't collide with time diffs
-      return r * 1000 if r != 0
-    end
-
-    @date - rhs.date
-  end
-
-  def same_set?(rhs)
-    _cmp(rhs).abs < 180
-  end
+  include RevSort
 
   def branch
     @rev[0..@rev.rindex('.')-1]
@@ -59,25 +69,48 @@ end
 
 
 class Repo
-  class Set < Array
-    attr_accessor :author, :date, :ignore, :branch_from, :branch
+  class Set
+    attr_accessor :author, :date, :ignore, :branch_from
+    attr_accessor :syms, :log
+    attr_accessor :max_date
 
-    def extract_data
-      @author = self[0].author
-      @date = self[0].date
-      @branch = self[0].syms
+    include RevSort
+
+    def initialize
+      @ary = []
       @ignore = true
+      @branch_level = -1
+    end
 
-      bl = -1
-
-      each do |rev|
-        if rev.branch_level > bl
-          @branch_from = rev.branch_from
-        end
-        @ignore &&= rev.action == :ignore
+    def <<(rev)
+      if not @author
+        @author = rev.author
+        @log = rev.log
+        @syms = rev.syms
+        @date = rev.date
+        @max_date = rev.date
       end
 
-      sort! {|a,b| a.file <=> b.file}
+      rev.log = @log    # save memory
+
+      if @date > rev.date
+        @date = rev.date
+      end
+      if @max_date < rev.date
+        @max_date = rev.date
+      end
+      if rev.branch_level > @branch_level
+        @branch_from = rev.branch_from
+        @branch_level = rev.branch_level
+      end
+      @ignore &&= rev.action == :ignore
+
+      @ary << rev
+    end
+
+    def each(&block)
+      @ary.each(&block)
+      self
     end
   end
 
@@ -104,8 +137,9 @@ class Repo
 
     @sym_aliases = Hash.new {|h, k| h[k] = [k]}
 
+    @sets = RBTree.new
+
     lastdir = nil
-    @revs = MultiRBTree.new
     Find.find(@path) do |f|
       next if f[-2..-1] != ',v'
       next if File.directory?(f)
@@ -306,32 +340,20 @@ class Repo
 
         rh.delete_if { |k, rev| rev.date < from_date }
 
-        rh.each_value {|r| @revs[r] = r}
+        rh.each_value do |r|
+          set = @sets[r]
+          if not set
+            set = Set.new
+            set << r
+            @sets[set] = set
+          else
+            set << r
+          end
+        end
       end
     end
 
-    self
-  end
-
-  def aggregate
-    @status.call("Aggregating...")
-    @sets = []
-    set = Set.new
-    @revs.each_key do |r|
-      if not set.empty? and not set[-1].same_set?(r)
-        set.extract_data
-	@sets << set
-	set = Set.new
-      end
-      set << r
-    end
-    if not set.empty?
-      set.extract_data
-      @sets << set
-    end
-    @sets.sort! {|a, b| a.date <=> b.date }
-
-    @revs = nil
+    @sets.readjust {|s1, s2| s1.date <=> s2.date}
 
     self
   end
@@ -342,12 +364,11 @@ if $0 == __FILE__
 
   repo = Repo.new(ARGV[0], lambda {|m| puts m})
   repo.scan
-  repo.aggregate
 
-  repo.sets.each do |s|
+  repo.sets.each_value do |s|
     print "#{s.author} #{s.date} on "
-    if s.branch
-      print "#{s.branch} branching from #{s.branch_from}"
+    if s.syms
+      print "#{s.syms[0]} branching from #{s.branch_from}"
     else
       print "trunk"
     end
