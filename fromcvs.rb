@@ -370,8 +370,7 @@ class Repo
       logmsg = nil
 
       if set.syms
-        # TODO select correct alias
-        branch = set.syms[0]
+        branch = @sym_aliases[set.syms[0]][0]
 
         is_vendor = [:vendor, :vendor_merge].include?(set[0].action)
 
