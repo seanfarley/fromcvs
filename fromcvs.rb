@@ -81,7 +81,7 @@ class Repo
     end
   end
 
-  attr_reader :sets
+  attr_reader :sets, :sym_aliases
 
   def initialize(path, status=nil)
     @status = status || lambda {|m|}
@@ -134,7 +134,18 @@ class Repo
           f.delete_at(-2) if f[-2] == '0'
           next unless f.length % 2 == 1
           sym_rev[f] ||= []
-          sym_rev[f].push(norm_h[k] ||= k).sort!
+          sym_rev[f].push(norm_h[k] ||= k)
+        end
+        sym_rev.each_value do |sl|
+          next unless sl.length > 1
+
+          # record symbol aliases, merge with existing
+          sl2 = sl.dup
+          sl.each do |s|
+            sl2 += @sym_aliases[s]
+          end
+          sl2.uniq!
+          sl2.each {|s| @sym_aliases[s].replace(sl2)}
         end
 
 	rf.each_value do |rev|
@@ -349,6 +360,10 @@ if $0 == __FILE__
       print " " + r.syms.join(',') if r.syms
       print "\n"
     end
+  end
+
+  repo.sym_aliases.each do |sym, a|
+    puts "#{sym} is equivalent to #{a.join(',')}"
   end
 
   puts "#{repo.sets.length} sets"
