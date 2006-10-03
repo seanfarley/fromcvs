@@ -103,14 +103,19 @@ class Repo
         @branch_from = rev.branch_from
         @branch_level = rev.branch_level
       end
-      @ignore &&= rev.action == :ignore
+      ignore = rev.action == :ignore
+      @ignore &&= ignore
 
-      @ary << rev
+      @ary << rev unless ignore
     end
 
     def each(&block)
       @ary.each(&block)
       self
+    end
+
+    def [](idx)
+      @ary[idx]
     end
   end
 
@@ -246,7 +251,7 @@ class Repo
           # of course only if we're not (again) on the branch
           rev = rh['1.1.1.1']
           while rev
-            if not trunkrev or rev.date < trunkrev.date
+            if rev.state != :dead && (!trunkrev || rev.date < trunkrev.date)
               rev.action = :vendor_merge
             else
               rev.action = :vendor
@@ -357,13 +362,124 @@ class Repo
 
     self
   end
+
+  def commit(dest)
+    @sets.each_value do |set|
+      next if set.ignore
+
+      logmsg = nil
+
+      if set.syms
+        # TODO select correct alias
+        branch = set.syms[0]
+
+        is_vendor = [:vendor, :vendor_merge].include?(set[0].action)
+
+        if not dest.has_branch?(branch)
+          dest.create_branch(branch, set.branch_from, is_vendor)
+        end
+        dest.select_branch(branch)
+      else
+        dest.select_branch(nil)
+      end
+
+      files = []
+      merge_files = []
+      set.each do |rev|
+        files << rev.file
+
+        filename = File.join(@path, rev.file+',v')
+        if not File.exists?(filename)
+          fnp = File.split(rev.file+',v')
+          filename = File.join(@path, fnp[0..-2], 'Attic', fnp[-1])
+        end
+ 
+        RCSFile.open(filename) do |rf|
+          logmsg = rf.getlog(rev.rev) unless logmsg
+
+          stat = File.stat(filename)
+          if rev.state == :dead
+            dest.remove(rev.file)
+          else
+            data = rf.checkout(rev.rev)
+            # implement keyword expansion here
+            dest.update(rev.file, data, stat.mode, stat.uid, stat.gid)
+          end
+
+          if [:branch_merge, :vendor_merge].include?(rev.action)
+            merge_files << [rev.state, rev.file, data, stat.mode, stat.uid, stat.gid]
+          end
+        end
+      end
+
+      commitid = dest.commit(set.author, set.date, logmsg, files)
+
+      unless merge_files.empty?
+        dest.select_branch(nil)
+        merge_files.each do |p|
+          if p.shift == :dead
+            dest.remove(p.shift)
+          else
+            dest.update(*p)
+          end
+        end
+
+        dest.merge(commitid, set.author, set.date, logmsg, merge_files)
+      end
+    end
+  end
 end
 
-if $0 == __FILE__
-  require 'pp'
 
+class PrintDestRepo
+  def initialize
+    @branches = {}
+  end
+
+  def has_branch?(branch)
+    @branches.include? branch
+  end
+
+  def create_branch(branch, parent, vendor_p)
+    if vendor_p
+      puts "Creating vendor branch #{branch}"
+    else
+      puts "Branching #{branch} from #{parent}"
+    end
+    @branches[branch] = true
+  end
+
+  def select_branch(branch)
+    @curbranch = branch
+  end
+
+  def remove(file)
+    puts "\tremoving #{file}"
+  end
+
+  def update(file, data, mode, uid, gid)
+    puts "\t#{file} #{mode}"
+  end
+
+  def commit(author, date, msg, files)
+    puts "set by #{author} on #{date} on #{@curbranch or 'TRUNK'}"
+    @curbranch
+  end
+
+  def merge(branch, author, date, msg, files)
+    puts "merge set from #{branch} by #{author} on #{date} on #{@curbranch or 'TRUNK'}"
+  end
+end
+
+
+if $0 == __FILE__
   repo = Repo.new(ARGV[0], lambda {|m| puts m})
   repo.scan
+  printrepo = PrintDestRepo.new
+
+  repo.commit(printrepo)
+
+  exit 0
 
   repo.sets.each_value do |s|
     print "#{s.author} #{s.date} on "
