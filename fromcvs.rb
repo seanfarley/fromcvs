@@ -119,6 +119,22 @@ class Repo
     end
   end
 
+  class BranchPoint
+    attr_accessor :level, :from
+
+    def initialize(level=-1, from=nil)
+      @level = level
+      @from = from
+    end
+
+    def update(bp)
+      if @level < bp.level
+        @level = bp.level
+        @from = bp.from
+      end
+    end
+  end
+
   attr_reader :sets, :sym_aliases
 
   def initialize(path, status=nil)
@@ -140,8 +156,8 @@ class Repo
     # hash so that each distinct string only is present one time.
     norm_h = {}
 
+    @branchpoints = Hash.new {|h, k| h[k] = BranchPoint.new}
     @sym_aliases = Hash.new {|h, k| h[k] = [k]}
-
     @sets = RBTree.new
 
     lastdir = nil
@@ -308,20 +324,23 @@ class Repo
             if not rev.syms
               rev.action = :ignore
             else
-              if rev.branch_level == 1
-                rev.branch_from = :TRUNK
+              level = rev.branch_level
+              if level == 1
+                br = nil
               else
                 # determine the branch we branched from
                 br = rev.rev.split('.')[0..-3]
                 # if we "branched" from the vendor branch
                 # we effectively are branching from trunk
                 if br[0..-2] == ['1', '1', '1']
-                  rev.branch_from = :TRUNK
+                  br = nil
                 else
-                  br = rh[br.join('.')]
-                  rev.branch_from = br.syms
+                  br = rh[br.join('.')].syms
                 end
               end
+
+              bpl = @branchpoints[rev.syms[0]]
+              bpl.update(BranchPoint.new(level, br))
             end
             rev.action ||= :branch
           end
@@ -358,6 +377,18 @@ class Repo
       end
     end
 
+    @sym_aliases.each_value do |syms|
+      # collect best match
+      bp = BranchPoint.new
+      syms.each do |sym|
+        bp.update(@branchpoints[sym])
+      end
+      # and write back
+      syms.each do |sym|
+        @branchpoints[sym] = bp
+      end
+    end
+
     @sets.readjust {|s1, s2| s1.date <=> s2.date}
 
     self
@@ -371,8 +402,9 @@ class Repo
 
       if set.syms
         branch = @sym_aliases[set.syms[0]][0]
-        if set.branch_from != :TRUNK
-          branch_from = @sym_aliases[set.branch_from[0]][0]
+        branch_from = @branchpoints[branch].from
+        if branch_from
+          branch_from = @sym_aliases[branch_from][0]
         else
           branch_from = nil
         end
@@ -453,7 +485,7 @@ class PrintDestRepo
     if vendor_p
       puts "Creating vendor branch #{branch}"
     else
-      puts "Branching #{branch} from #{parent}"
+      puts "Branching #{branch} from #{parent or 'TRUNK'}"
     end
     @branches[branch] = true
   end
