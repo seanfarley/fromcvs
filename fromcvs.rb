@@ -335,7 +335,7 @@ class Repo
                 if br[0..-2] == ['1', '1', '1']
                   br = nil
                 else
-                  br = rh[br.join('.')].syms
+                  br = rh[br.join('.')].syms[0]
                 end
               end
 
