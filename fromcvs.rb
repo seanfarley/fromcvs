@@ -395,8 +395,18 @@ class Repo
   end
 
   def commit(dest)
+    dest.start
+
+    lastdate = Time.at(0)
+
     @sets.each_value do |set|
       next if set.ignore
+
+      # if we're in a period of silence, tell the target to flush
+      if set.date - lastdate > 180
+        dest.flush
+      end
+      lastdate = set.date
 
       logmsg = nil
 
@@ -475,6 +485,12 @@ end
 class PrintDestRepo
   def initialize
     @branches = {}
+  end
+  
+  def start
+  end
+
+  def flush
   end
 
   def has_branch?(branch)
