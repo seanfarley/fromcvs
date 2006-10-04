@@ -371,11 +371,16 @@ class Repo
 
       if set.syms
         branch = @sym_aliases[set.syms[0]][0]
+        if set.branch_from != :TRUNK
+          branch_from = @sym_aliases[set.branch_from[0]][0]
+        else
+          branch_from = nil
+        end
 
         is_vendor = [:vendor, :vendor_merge].include?(set[0].action)
 
         if not dest.has_branch?(branch)
-          dest.create_branch(branch, set.branch_from, is_vendor)
+          dest.create_branch(branch, branch_from, is_vendor)
         end
         dest.select_branch(branch)
       else
@@ -414,8 +419,11 @@ class Repo
       commitid = dest.commit(set.author, set.date, logmsg, files)
 
       unless merge_files.empty?
+        files = []
         dest.select_branch(nil)
         merge_files.each do |p|
+          files << p[1]
+
           if p.shift == :dead
             dest.remove(p.shift)
           else
@@ -423,9 +431,11 @@ class Repo
           end
         end
 
-        dest.merge(commitid, set.author, set.date, logmsg, merge_files)
+        dest.merge(commitid, set.author, set.date, logmsg, files)
       end
     end
+
+    dest.finish
   end
 end
 
@@ -467,6 +477,9 @@ class PrintDestRepo
 
   def merge(branch, author, date, msg, files)
     puts "merge set from #{branch} by #{author} on #{date} on #{@curbranch or 'TRUNK'}"
+  end
+
+  def finish
   end
 end
 
