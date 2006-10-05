@@ -406,7 +406,9 @@ class Repo
       if set.date - lastdate > 180
         dest.flush
       end
-      lastdate = set.date
+      if lastdate < set.max_date
+        lastdate = set.max_date
+      end
 
       logmsg = nil
 
@@ -458,7 +460,9 @@ class Repo
         end
       end
 
-      commitid = dest.commit(set.author, set.date, logmsg, files)
+      # We commit with max_date, so that later the backend
+      # is able to tell us the last point of silence.
+      commitid = dest.commit(set.author, set.max_date, logmsg, files)
 
       unless merge_files.empty?
         files = []
@@ -473,7 +477,7 @@ class Repo
           end
         end
 
-        dest.merge(commitid, set.author, set.date, logmsg, files)
+        dest.merge(commitid, set.author, set.max_date, logmsg, files)
       end
     end
 
@@ -533,8 +537,14 @@ end
 
 
 if $0 == __FILE__
+  require 'time'
+
   repo = Repo.new(ARGV[0], lambda {|m| puts m})
-  repo.scan
+  starttime = Time.at(0)
+  if ARGV[1]
+    starttime = Time.parse(ARGV[1])
+  end
+  repo.scan(starttime)
   printrepo = PrintDestRepo.new
 
   repo.commit(printrepo)
