@@ -86,8 +86,8 @@ class HGDestRepo
   def _commit(author, date, msg, files, p2=nil)
     p1 = @tags[@curbranch]
     @hgrepo.rawcommit(files, msg, author, "#{date.to_i} 0", p1, p2, @wlock)
-    tag(@curbranch, @hgrepo.changelog.tip)
     @commits += 1
+    tag(@curbranch, @hgrepo.changelog.tip)
   end
 
   private
