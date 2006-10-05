@@ -108,6 +108,7 @@ class HGDestRepo
     tf = @hgrepo.opener('localtags', 'w')
     tf.truncate(0)
     @tags.each do |branch, node|
+      next if branch == 'tip'
       tf.write("#{node.unpack('H*')} #{branch}\n")
     end
     tf.close
