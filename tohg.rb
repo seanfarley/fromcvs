@@ -90,6 +90,7 @@ class HGDestRepo
   def _commit(author, date, msg, files, p2=nil)
     p1 = @tags[@curbranch]
     @hgrepo.rawcommit(files, msg, author, "#{date.to_i} 0", p1, p2, @wlock)
+    @hgrepo.dirstate.setparents(Py::mercurial::node::nullid)  # prevent updating the dirstate
     @commits += 1
     tag(@curbranch, @hgrepo.changelog.tip)
   end
