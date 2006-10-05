@@ -6,7 +6,7 @@ require 'python/mercurial/localrepo'
 
 
 class HGDestRepo
-  def initialize(hgroot, status)
+  def initialize(hgroot, status=lambda{|s|})
     @status = status
 
     ui = Py.mercurial.ui.ui(Py::KW, :interactive => false)
@@ -17,6 +17,10 @@ class HGDestRepo
     unless @tags.include? 'HEAD'
       tag('HEAD', Py.mercurial.node.nullid)
     end
+  end
+
+  def last_date
+    Time.at(@hgrepo.changelog.read(@hgrepo.changelog.tip)[2][0])
   end
 
   def start
@@ -130,6 +134,6 @@ if $0 == __FILE__
 
   cvsrepo = Repo.new(cvsdir, status)
   hgrepo = HGDestRepo.new(hgdir, status)
-  cvsrepo.scan
+  cvsrepo.scan(hgrepo.last_date.succ)
   cvsrepo.commit(hgrepo)
 end
