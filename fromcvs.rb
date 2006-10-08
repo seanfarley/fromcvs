@@ -53,7 +53,8 @@ module RevSort
 end
 
 class RCSFile::Rev
-  attr_accessor :file, :syms, :author, :branches, :state, :rev, :next
+  attr_accessor :file, :rcsfile
+  attr_accessor :syms, :author, :branches, :state, :rev, :next
   attr_accessor :action, :link, :branch_from
 
   include RevSort
@@ -135,11 +136,112 @@ class Repo
     end
   end
 
+  class TagExpander
+    def initialize(cvsroot)
+      @cvsroot = cvsroot
+      @keywords = {}
+      expandkw = []
+      self.methods.select{|m| m =~ /^expand_/}.each do |kw|
+        kw[/^expand_/] = ''
+        @keywords[kw] = kw
+      end
+
+      configs = %w{config options}
+      begin
+        File.foreach(File.join(@cvsroot, 'CVSROOT', configs.shift)) do |line|
+          if m = /^\s*(?:LocalKeyword|tag)=(\w+)(?:=(\w+))?/.match(line)
+            @keywords[m[1]] = m[2] || 'Id'
+          elsif m = /^\s*(?:KeywordExpand|tagexpand)=(e|i)(\w+(?:,\w+)*)?/.match(line)
+            inc = m[1] == 'i'
+            keyws = (m[2] || '').split(',')
+            if inc
+              expandkw = keyws
+            else
+              expandkw -= keyws
+            end
+          end
+        end
+      rescue Errno::EACCES, Errno::ENOENT
+        retry unless configs.empty?
+      end
+
+      if expandkw.empty?
+        # produce unmatchable regexp
+        @kwre = Regexp.compile('$nonmatch')
+      else
+        @kwre = Regexp.compile('\$('+expandkw.join('|')+')(?::[^$]*)?\$')
+      end
+    end
+
+    def expand(str, mode, rev)
+      str.gsub(@kwre) do |s|
+        m = @kwre.match(s)    # gsub passes String, not MatchData
+        case mode
+        when 'o', 'b'
+          s
+        when 'k'
+          "$#{m[1]}$"
+        when 'kv', nil
+          "$#{m[1]}: "  + send("expand_#{@keywords[m[1]]}", rev) + ' $'
+        else
+          s
+        end
+      end
+    end
+
+    def expand_Author(rev)
+      rev.author
+    end
+
+    def expand_Date(rev)
+      rev.date.strftime('%Y/%m/%d %H:%M:%S')
+    end
+
+    def _expand_header(rev)
+      " #{rev.rev} " + expand_Date(rev) + " #{rev.author} #{rev.state}"
+    end
+
+    def expand_CVSHeader(rev)
+      rev.rcsfile + _expand_header(rev)
+    end
+
+    def expand_Header(rev)
+      File.join(@cvsroot, rev.rcsfile) + _expand_header(rev)
+    end
+
+    def expand_Id(rev)
+      File.basename(rev.rcsfile) + _expand_header(rev)
+    end
+
+    def expand_Name(rev)
+      rev.syms[0]
+    end
+
+    def expand_RCSfile(rev)
+      File.basename(rev.rcsfile)
+    end
+
+    def expand_Revision(rev)
+      rev.rev
+    end
+
+    def expand_Source(rev)
+      File.join(@cvsroot, rev.rcsfile)
+    end
+
+    def expand_State(rev)
+      rev.state.to_s
+    end
+  end
+
   attr_reader :sets, :sym_aliases
 
-  def initialize(path, status=nil)
+  def initialize(cvsroot, modul, status=nil)
     @status = status || lambda {|m|}
-    @path = path.chomp(File::SEPARATOR)
+    @cvsroot = cvsroot.chomp(File::SEPARATOR)
+    @modul = modul
+    @path = File.join(@cvsroot, @modul)
+    @expander = TagExpander.new(cvsroot)
   end
 
   def _normalize_path(f)
@@ -158,7 +260,7 @@ class Repo
 
     @branchpoints = Hash.new {|h, k| h[k] = BranchPoint.new}
     @sym_aliases = Hash.new {|h, k| h[k] = [k]}
-    @sets = RBTree.new
+    @sets = MultiRBTree.new
 
     lastdir = nil
     Find.find(@path) do |f|
@@ -175,6 +277,7 @@ class Repo
 
       rh = {}
       nf = _normalize_path(f)
+      rcsfile = f[@cvsroot.length+1..-1]
       RCSFile.open(f) do |rf|
         trunkrev = nil    # "rev 1.2", when the vendor branch was overwritten
 
@@ -211,6 +314,7 @@ class Repo
 	  #next if rev.date < from_date
 
 	  rev.file = nf
+          rev.rcsfile = rcsfile
           if rev.branch_level > 0
             branch = rev.rev.split('.')[0..-2]
             rev.syms = sym_rev[branch]
@@ -436,12 +540,7 @@ class Repo
       set.each do |rev|
         files << rev.file
 
-        filename = File.join(@path, rev.file+',v')
-        if not File.exists?(filename)
-          fnp = File.split(rev.file+',v')
-          filename = File.join(@path, fnp[0..-2], 'Attic', fnp[-1])
-        end
- 
+        filename = File.join(@cvsroot, rev.rcsfile)
         RCSFile.open(filename) do |rf|
           logmsg = rf.getlog(rev.rev) unless logmsg
 
@@ -450,7 +549,7 @@ class Repo
             dest.remove(rev.file)
           else
             data = rf.checkout(rev.rev)
-            # implement keyword expansion here
+            data = @expander.expand(data, rf.expand, rev)
             dest.update(rev.file, data, stat.mode, stat.uid, stat.gid)
           end
 
@@ -483,6 +582,13 @@ class Repo
 
     dest.finish
   end
+
+  def convert(dest)
+    last_date = dest.last_date.succ
+
+    scan(last_date)
+    commit(dest)
+  end
 end
 
 
@@ -490,7 +596,7 @@ class PrintDestRepo
   def initialize
     @branches = {}
   end
-  
+
   def start
   end
 
@@ -501,6 +607,10 @@ class PrintDestRepo
     @branches.include? branch
   end
 
+  def last_date
+    Time.at(0)
+  end
+  
   def create_branch(branch, parent, vendor_p)
     if vendor_p
       puts "Creating vendor branch #{branch}"
@@ -539,15 +649,14 @@ end
 if $0 == __FILE__
   require 'time'
 
-  repo = Repo.new(ARGV[0], lambda {|m| puts m})
+  repo = Repo.new(ARGV[0], ARGV[1], lambda {|m| puts m})
   starttime = Time.at(0)
   if ARGV[1]
     starttime = Time.parse(ARGV[1])
   end
-  repo.scan(starttime)
   printrepo = PrintDestRepo.new
 
-  repo.commit(printrepo)
+  repo.convert(printrepo)
 
   exit 0
 

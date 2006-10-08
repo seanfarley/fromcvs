@@ -23,6 +23,9 @@ class HGDestRepo
     Time.at(@hgrepo.changelog.read(@hgrepo.changelog.tip)[2][0])
   end
 
+  def filelist
+  end
+
   def start
     @wlock = @hgrepo.wlock
     @transaction = @hgrepo.transaction
@@ -127,15 +130,14 @@ if $0 == __FILE__
     puts str
   end
 
-  if ARGV.length != 2
-    puts "call: tohg <cvsdir> <hgdir>"
+  if ARGV.length != 3
+    puts "call: tohg <cvsroot> <module> <hgdir>"
     exit 1
   end
 
-  cvsdir, hgdir = ARGV
+  cvsdir, modul, hgdir = ARGV
 
-  cvsrepo = Repo.new(cvsdir, status)
+  cvsrepo = Repo.new(cvsdir, modul, status)
   hgrepo = HGDestRepo.new(hgdir, status)
-  cvsrepo.scan(hgrepo.last_date.succ)
-  cvsrepo.commit(hgrepo)
+  cvsrepo.convert(hgrepo)
 end
