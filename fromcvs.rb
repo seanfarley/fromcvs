@@ -371,7 +371,7 @@ class Repo
           # of course only if we're not (again) on the branch
           rev = rh['1.1.1.1']
           while rev
-            if rev.state != :dead && (!trunkrev || rev.date < trunkrev.date)
+            if !trunkrev || rev.date < trunkrev.date
               rev.action = :vendor_merge
             else
               rev.action = :vendor
