@@ -650,10 +650,10 @@ if $0 == __FILE__
   require 'time'
 
   repo = Repo.new(ARGV[0], ARGV[1], lambda {|m| puts m})
-  starttime = Time.at(0)
-  if ARGV[1]
-    starttime = Time.parse(ARGV[1])
-  end
+##  starttime = Time.at(0)
+##  if ARGV[1]
+##    starttime = Time.parse(ARGV[1])
+##  end
   printrepo = PrintDestRepo.new
 
   repo.convert(printrepo)
