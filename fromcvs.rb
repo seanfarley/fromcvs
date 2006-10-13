@@ -253,7 +253,14 @@ class Repo
     return File.join(fi)
   end
 
-  def scan(from_date=Time.at(0))
+  def scan(from_date=Time.at(0), filelist=nil)
+    # Handling of repo surgery
+    if filelist
+      @known_files = []
+      filelist.each {|v| @known_files[v] = true}
+      @added_files = []
+    end
+
     # at the expense of some cpu we normalize strings through this
     # hash so that each distinct string only is present one time.
     norm_h = {}
@@ -273,11 +280,19 @@ class Repo
 	lastdir = dir
       end
 
-      next if File.mtime(f) < from_date
-
-      rh = {}
       nf = _normalize_path(f)
       rcsfile = f[@cvsroot.length+1..-1]
+
+      if @known_files and not @known_files.member?(nf)
+        appeared = true
+      else
+        appeared = false
+      end
+      if File.mtime(f) < from_date and not appeared
+        next
+      end
+
+      rh = {}
       RCSFile.open(f) do |rf|
         trunkrev = nil    # "rev 1.2", when the vendor branch was overwritten
 
@@ -466,6 +481,20 @@ class Repo
           rev.action = :ignore
         end
 
+        # This file appeared since the last scan/commit
+        # If the first rev is before that, it must have been repo copied
+        if appeared
+          firstrev = trunkrev
+          while firstrev.next
+            firstrev = rh[firstrev.next]
+          end
+          if firstrev.date < fromdate
+            revs = rh.values.select {|rev| rev.date < from_date}
+            revs.sort! {|a, b| a.date <=> b.date}
+            @added_files << revs
+          end
+        end
+
         rh.delete_if { |k, rev| rev.date < from_date }
 
         rh.each_value do |r|
@@ -500,6 +529,8 @@ class Repo
 
   def commit(dest)
     dest.start
+
+    # XXX First handle possible repo surgery
 
     lastdate = Time.at(0)
 
@@ -585,8 +616,9 @@ class Repo
 
   def convert(dest)
     last_date = dest.last_date.succ
+    filelist = dest.filelist
 
-    scan(last_date)
+    scan(last_date, filelist)
     commit(dest)
   end
 end
