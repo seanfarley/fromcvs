@@ -148,23 +148,26 @@ class Repo
 
       configs = %w{config options}
       begin
-        File.foreach(File.join(@cvsroot, 'CVSROOT', configs.shift)) do |line|
-          if m = /^\s*(?:LocalKeyword|tag)=(\w+)(?:=(\w+))?/.match(line)
-            @keywords[m[1]] = m[2] || 'Id'
-          elsif m = /^\s*(?:KeywordExpand|tagexpand)=(e|i)(\w+(?:,\w+)*)?/.match(line)
-            inc = m[1] == 'i'
-            keyws = (m[2] || '').split(',')
-            if inc
-              expandkw = keyws
-            else
-              expandkw -= keyws
+        until configs.empty? do
+          File.foreach(File.join(@cvsroot, 'CVSROOT', configs.shift)) do |line|
+            if m = /^\s*(?:LocalKeyword|tag)=(\w+)(?:=(\w+))?/.match(line)
+              @keywords[m[1]] = m[2] || 'Id'
+            elsif m = /^\s*(?:KeywordExpand|tagexpand)=(e|i)(\w+(?:,\w+)*)?/.match(line)
+              inc = m[1] == 'i'
+              keyws = (m[2] || '').split(',')
+              if inc
+                expandkw = keyws
+              else
+                expandkw -= keyws
+              end
             end
           end
         end
       rescue Errno::EACCES, Errno::ENOENT
-        retry unless configs.empty?
+        retry
       end
 
+      expandkw.each {|kw| puts "expanding #{kw} as #{@keywords[kw]}"}
       if expandkw.empty?
         # produce unmatchable regexp
         @kwre = Regexp.compile('$nonmatch')
