@@ -23,7 +23,13 @@ class HGDestRepo
     Time.at(@hgrepo.changelog.read(@hgrepo.changelog.tip)[2][0])
   end
 
-  def filelist
+  def filelist(tag)
+    if tag == :complete
+      # XXX to be implemented
+    else
+      node = @tags[tag || 'HEAD']
+      @hgrepo.manifest.read(@hgrepo.changelog.read(node)[0]).keys
+    end
   end
 
   def start

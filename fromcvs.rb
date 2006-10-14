@@ -115,23 +115,61 @@ class Repo
       self
     end
 
+    def find(&block)
+      @ary.find(&block)
+    end
+
+    def select(&block)
+      @ary.select(&block)
+    end
+
     def [](idx)
       @ary[idx]
     end
   end
 
   class BranchPoint
+    attr_accessor :name
     attr_accessor :level, :from
+    attr_accessor :files, :revs
+    attr_reader :state
+
+    STATE_HOLDOFF = 0
+    STATE_MERGE = 1
+    STATE_BRANCHED = 2
 
     def initialize(level=-1, from=nil)
       @level = level
       @from = from
+      @files = {}
+      @state = STATE_HOLDOFF
     end
 
     def update(bp)
       if @level < bp.level
         @level = bp.level
         @from = bp.from
+      end
+    end
+
+    def holdoff?
+      @state == STATE_HOLDOFF
+    end
+
+    def merge?
+      @state == STATE_MERGE
+    end
+
+    def branched?
+      @state == STATE_BRANCHED
+    end
+
+    def state_transition(dest)
+      case dest
+      when :created
+        @state = STATE_MERGE if holdoff?
+      when :branched
+        @state = STATE_BRANCHED if merge?
       end
     end
   end
@@ -167,7 +205,6 @@ class Repo
         retry
       end
 
-      expandkw.each {|kw| puts "expanding #{kw} as #{@keywords[kw]}"}
       if expandkw.empty?
         # produce unmatchable regexp
         @kwre = Regexp.compile('$nonmatch')
@@ -268,9 +305,14 @@ class Repo
     # hash so that each distinct string only is present one time.
     norm_h = {}
 
+    # branchlists is a Hash mapping parent branches to a list of BranchPoints
+    @branchlists = Hash.new {|h, k| h[k] = []}
     @branchpoints = Hash.new {|h, k| h[k] = BranchPoint.new}
     @sym_aliases = Hash.new {|h, k| h[k] = [k]}
     @sets = MultiRBTree.new
+
+    # branchrevs is a Hash mapping branches to the branch start revs
+    branchrevs = Hash.new {|h, k| h[k] = []}
 
     lastdir = nil
     Find.find(@path) do |f| begin
@@ -308,7 +350,7 @@ class Repo
         rf.symbols.each_pair do |k, v|
           vs = v.split('.')
           vs.delete_at(-2) if vs[-2] == '0'
-          next unless vs.length % 2 == 1
+          next unless vs.length % 2 == 1 && vs.length > 1
           sym_rev[vs] ||= []
           sym_rev[vs].push(norm_h[k] ||= k)
         end
@@ -350,6 +392,37 @@ class Repo
             end
           end
 	end
+
+        # Branch handling
+        # Unfortunately branches can span multiple changesets.  To fix this,
+        # we collect the list of branch revisions (revisions where branch X
+        # branches from) per branch.
+        # When committing revisions, we hold off branching (and record the
+        # files) until we are about to change a file on the parent branch,
+        # which should already exist in the child branch, or until we are about
+        # to commit the first revision to the child branch.  
+        # After this, we merge each branch revision to the branch until the
+        # list is empty.
+        sym_rev.each do |rev, sl|
+          next if rev == ['1', '1', '1']
+
+          branchrev = rev[0..-2].join('.')
+          br = rh[branchrev]
+          if not br
+            $stderr.puts "#{f}: branch symbol `#{sl[0]}' has dangling revision #{branchrev}"
+            next
+          end
+
+          # Add this rev unless:
+          # - the branch rev is dead (no use adding a dead file)
+          # - the first rev "was added on branch" (will be ignored later)
+          next if br.state == :dead
+          # get first rev of branch
+          frev = rh[br.branches.find {|r| r.split('.')[0..-2] == rev}]
+          next if frev && frev.date == br.date && frev.state == :dead
+
+          branchrevs[sl[0]] << br
+        end
 
         # What we need to do to massage the revs correctly:
         # * branch versions need action "branch" and a name assigned
@@ -395,7 +468,7 @@ class Repo
               rev.action = :vendor
             end
             if vendor_sym
-            rev.syms ||= vendor_sym
+              rev.syms ||= vendor_sym
             end
             rev = rh[rev.next]
           end
@@ -512,14 +585,20 @@ class Repo
         end
       end
     rescue Exception => e
-      raise e.exception(e.message + " while handling RCS file #{f}")
+      ne = e.exception(e.message + " while handling RCS file #{f}")
+      ne.set_backtrace(e.backtrace)
+      raise ne
     end end
 
     @sym_aliases.each_value do |syms|
       # collect best match
+      # collect branch list
       bp = BranchPoint.new
+      bl = []
       syms.each do |sym|
         bp.update(@branchpoints[sym])
+        bl.concat(branchrevs[sym])
+        branchrevs[sym].replace(bl)
       end
       # and write back
       syms.each do |sym|
@@ -527,9 +606,101 @@ class Repo
       end
     end
 
+    branchrevs.each do |sym, bl|
+      sym = @sym_aliases[sym][0]
+      bl.uniq!
+
+      next if bl.empty?
+
+      bp = @branchpoints[sym]
+      bp.name = sym
+      if bp.from
+        bp.from = @sym_aliases[bp.from][0]
+      end
+      bp.revs = Hash[*bl.zip(bl).flatten]
+      @branchlists[bp.from] << bp
+    end
+
     @sets.readjust {|s1, s2| s1.date <=> s2.date}
 
+    # XXX move multiname branch handling here
+
     self
+  end
+
+  def fixup_branch_before(dest, bp, date)
+    return if not bp.holdoff?
+
+    bp.state_transition(:created)
+
+    return if dest.has_branch?(bp.name)
+
+    dest.create_branch(bp.name, bp.from, false)
+
+    # Remove files not (yet) present on the branch
+    delfiles = dest.filelist(bp.from).select {|f| not bp.files.include? f}
+    unless delfiles.empty?
+      dest.select_branch(bp.name)
+      delfiles.each do |f|
+        dest.remove(f)
+      end
+      dest.commit('branch fixup', date,
+                  "Removing files not present on branch #{bp.name}", delfiles)
+    end
+  end
+
+  def fixup_branch_after(dest, branch, commitid, set, file_data)
+    # If neccessary, merge parent branch revs to the child branches
+    # We need to recurse to reach all child branches
+    cleanbl = false
+    @branchlists[branch].each do |bp|
+      commitrevs = set.select {|rev| bp.revs.include? rev}
+      next if commitrevs.empty?
+
+      commitrevs.each do |rev|
+        bp.revs.delete(rev)
+        bp.files[rev.file] = rev.file
+      end
+      merging = bp.merge?
+
+      if bp.revs.empty?
+        bp.state_transition(:branched)
+        cleanbl = true
+      end
+
+      # Only bother if we are merging
+      next unless merging
+
+      dest.select_branch(bp.name)
+      files = []
+      commitrevs.each do |rev|
+        dest.update(*file_data[rev])
+        files << rev.file
+      end
+
+      parentid = dest.merge(commitid, 'branch fixup', set.date,
+                 "Add files from parent branch #{branch || 'HEAD'}", files)
+
+      cleanbl |= fixup_branch_after(dest, bp.name, parentid, set, file_data)
+    end
+
+    cleanbl
+  end
+
+  def record_holdoff(bp, set)
+    # if we're holding off, record the files which match the revs
+    return unless bp.holdoff?
+
+    set.each do |rev|
+      next unless bp.revs.include?(rev)
+      bp.revs.delete(rev)
+      bp.files[rev.file] = rev.file
+    end
+
+    # We have to recurse on all child branches as well
+    @branchlists[bp.name].each do |bp|
+      record_holdoff(bp, set)
+    end
   end
 
   def commit(dest)
@@ -550,78 +721,125 @@ class Repo
         lastdate = set.max_date
       end
 
+      # Collect neccessary data, so that we can play with it later
       logmsg = nil
-
-      if set.syms
-        branch = @sym_aliases[set.syms[0]][0]
-        branch_from = @branchpoints[branch].from
-        if branch_from
-          branch_from = @sym_aliases[branch_from][0]
-        else
-          branch_from = nil
-        end
-
-        is_vendor = [:vendor, :vendor_merge].include?(set[0].action)
-
-        if not dest.has_branch?(branch)
-          dest.create_branch(branch, branch_from, is_vendor)
-        end
-        dest.select_branch(branch)
-      else
-        dest.select_branch(nil)
-      end
-
-      files = []
-      merge_files = []
+      file_data = {}
+      is_vendor = false
+      merge_revs = []
       set.each do |rev|
-        files << rev.file
-
         filename = File.join(@cvsroot, rev.rcsfile)
         RCSFile.open(filename) do |rf|
           logmsg = rf.getlog(rev.rev) unless logmsg
 
           stat = File.stat(filename)
           if rev.state == :dead
-            dest.remove(rev.file)
+            file_data[rev] = rev.file
           else
             data = rf.checkout(rev.rev)
             data = @expander.expand(data, rf.expand, rev)
-            dest.update(rev.file, data, stat.mode, stat.uid, stat.gid)
+            file_data[rev] = rev.file, data, stat.mode, stat.uid, stat.gid
           end
+          is_vendor |= [:vendor, :vendor_merge].include?(rev.action)
 
           if [:branch_merge, :vendor_merge].include?(rev.action)
-            merge_files << [rev.state, rev.file, data, stat.mode, stat.uid, stat.gid]
+            merge_revs << rev
           end
         end
       end
 
-      # We commit with max_date, so that later the backend
-      # is able to tell us the last point of silence.
-      commitid = dest.commit(set.author, set.max_date, logmsg, files)
+      # Repo copies:  Hate Hate Hate.  We have to deal with multiple
+      # almost equivalent branches in one set.
+      branches = []
+      set.each do |rev|
+        branches.concat(rev.syms) if rev.syms
+      end
+      branches.collect! {|s| @sym_aliases[s][0]}
+      branches.uniq!
 
-      unless merge_files.empty?
-        files = []
-        dest.select_branch(nil)
-        merge_files.each do |p|
-          files << p[1]
+      if branches.empty?
+        branches = [nil]
+      end
 
-          if p.shift == :dead
-            dest.remove(p.shift)
+      branches.each do |thisbranch|
+        if thisbranch
+          bp = @branchpoints[thisbranch]
+
+          if is_vendor
+            if not dest.has_branch?(thisbranch)
+              dest.create_branch(thisbranch, nil, true)
+            end
           else
-            dest.update(*p)
+            fixup_branch_before(dest, bp, set.max_date)
           end
         end
 
-        dest.merge(commitid, set.author, set.max_date, logmsg, files)
-      end
-    end
+        # Find out if one of the revs we're going to commit breaks
+        # the holdoff state of a child branch.
+        @branchlists[thisbranch].each do |bp|
+          next unless bp.holdoff?
+          if set.find {|rev| bp.files.include? rev.file}
+            fixup_branch_before(dest, bp, set.max_date)
+          end
+
+          record_holdoff(bp, set)
+        end
+
+        dest.select_branch(thisbranch)
+
+        files = []
+        file_data.each do |rev, data|
+          # Special repo copy handling:
+          # Some repos rename tags on repo copies.  This way we can refuse
+          # any revision which doesn't carry our tag and behave like CVS.
+          if thisbranch
+            if not rev.syms or not rev.syms.include? thisbranch
+              next
+            end
+          end
+
+          files << rev.file
+          if rev.state == :dead
+            dest.remove(*data)
+          else
+            dest.update(*data)
+          end
+        end
+
+        # We commit with max_date, so that later the backend
+        # is able to tell us the last point of silence.
+        commitid = dest.commit(set.author, set.max_date, logmsg, files)
+
+        unless merge_revs.empty?
+          files = []
+          dest.select_branch(nil)
+          merge_revs.each do |rev|
+            files << rev.file
+
+            if rev.state == :dead
+              dest.remove(rev.file)
+            else
+              dest.update(*file_data[rev])
+            end
+          end
+
+          dest.merge(commitid, set.author, set.max_date,
+                     "Merge from vendor branch #{thisbranch}:\n#{logmsg}", files)
+        end
+
+        if fixup_branch_after(dest, thisbranch, commitid, set, file_data)
+          @branchlists.each do |psym, bpl|
+            bpl.delete_if {|bp| bp.branched?}
+          end
+        end
+      end   # branches
+    end     # sets
 
     dest.finish
   end
 
   def convert(dest)
     last_date = dest.last_date.succ
-    filelist = dest.filelist
+    filelist = dest.filelist(:complete)
 
     scan(last_date, filelist)
     commit(dest)
