@@ -273,7 +273,7 @@ class Repo
     @sets = MultiRBTree.new
 
     lastdir = nil
-    Find.find(@path) do |f|
+    Find.find(@path) do |f| begin
       next if f[-2..-1] != ',v'
       next if File.directory?(f)
 
@@ -306,11 +306,11 @@ class Repo
         # At the same time we ignore any non-branch tag
         sym_rev = {}
         rf.symbols.each_pair do |k, v|
-          f = v.split('.')
-          f.delete_at(-2) if f[-2] == '0'
-          next unless f.length % 2 == 1
-          sym_rev[f] ||= []
-          sym_rev[f].push(norm_h[k] ||= k)
+          vs = v.split('.')
+          vs.delete_at(-2) if vs[-2] == '0'
+          next unless vs.length % 2 == 1
+          sym_rev[vs] ||= []
+          sym_rev[vs].push(norm_h[k] ||= k)
         end
         sym_rev.each_value do |sl|
           next unless sl.length > 1
@@ -511,7 +511,9 @@ class Repo
           end
         end
       end
-    end
+    rescue Exception => e
+      raise e.exception(e.message + " while handling RCS file #{f}")
+    end end
 
     @sym_aliases.each_value do |syms|
       # collect best match
