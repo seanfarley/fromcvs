@@ -810,8 +810,10 @@ class Repo
         commitid = dest.commit(set.author, set.max_date, logmsg, files)
 
         unless merge_revs.empty?
-          files = []
+          thisbranch = nil
           dest.select_branch(nil)
+
+          files = []
           merge_revs.each do |rev|
             files << rev.file
 
