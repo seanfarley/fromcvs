@@ -133,6 +133,7 @@ class Repo
     attr_accessor :level, :from
     attr_accessor :files, :revs
     attr_reader :state
+    attr_accessor :create_date
 
     STATE_HOLDOFF = 0
     STATE_MERGE = 1
@@ -143,6 +144,7 @@ class Repo
       @from = from
       @files = {}
       @state = STATE_HOLDOFF
+      @create_date = Time.at(0)
     end
 
     def update(bp)
@@ -308,6 +310,7 @@ class Repo
     # branchlists is a Hash mapping parent branches to a list of BranchPoints
     @branchlists = Hash.new {|h, k| h[k] = []}
     @branchpoints = Hash.new {|h, k| h[k] = BranchPoint.new}
+    @birthdates = {}
     @sym_aliases = Hash.new {|h, k| h[k] = [k]}
     @sets = MultiRBTree.new
 
@@ -557,6 +560,10 @@ class Repo
           rev.action = :ignore
         end
 
+        # record when the file was introduces, we need this later
+        # to check if this file even existed when a branch happened
+        @birthdates[nf] = (rev || trunkrev).date
+
         # This file appeared since the last scan/commit
         # If the first rev is before that, it must have been repo copied
         if appeared
@@ -635,6 +642,7 @@ class Repo
 
     return if dest.has_branch?(bp.name)
 
+    bp.create_date = date
     dest.create_branch(bp.name, bp.from, false)
 
     # Remove files not (yet) present on the branch
@@ -674,9 +682,21 @@ class Repo
       dest.select_branch(bp.name)
       files = []
       commitrevs.each do |rev|
+        # If this file was introduced after the branch, we are dealing
+        # with a FIXCVS issue which was addressed only recently.
+        # Previous CVS versions just added the tag to the current HEAD
+        # revision and didn't insert a dead revision on the branch with
+        # the same date, like it is happening now.
+        # This means history is unclear as we can't reliably determine
+        # if the tagging happened at the same time as the addition to
+        # the branch.  For now, just assume it did.
+        next if @birthdates[rev.file] > bp.create_date
+
         dest.update(*file_data[rev])
         files << rev.file
       end
+
+      next if files.empty?
 
       parentid = dest.merge(commitid, 'branch fixup', set.date,
                  "Add files from parent branch #{branch || 'HEAD'}", files)
@@ -687,19 +707,24 @@ class Repo
     cleanbl
   end
 
-  def record_holdoff(bp, set)
-    # if we're holding off, record the files which match the revs
-    return unless bp.holdoff?
+  def record_holdoff(branch, set)
+    @branchlists[branch].each do |bp|
+      # if we're holding off, record the files which match the revs
+      next unless bp.holdoff?
 
-    set.each do |rev|
-      next unless bp.revs.include?(rev)
-      bp.revs.delete(rev)
-      bp.files[rev.file] = rev.file
-    end
+      set.each do |rev|
+        next unless bp.revs.include?(rev)
+        bp.revs.delete(rev)
+        bp.files[rev.file] = rev.file
+      end
 
-    # We have to recurse on all child branches as well
-    @branchlists[bp.name].each do |bp|
-      record_holdoff(bp, set)
+      puts "holding off branch #{bp.name} from #{branch}"
+      set.each do |rev|
+        puts "\t#{rev.file}:#{rev.rev}"
+      end
+
+      # We have to recurse on all child branches as well
+      record_holdoff(bp.name, set)
     end
   end
 
@@ -780,8 +805,6 @@ class Repo
           if set.find {|rev| bp.files.include? rev.file}
             fixup_branch_before(dest, bp, set.max_date)
           end
-
-          record_holdoff(bp, set)
         end
 
         dest.select_branch(thisbranch)
@@ -827,6 +850,8 @@ class Repo
           dest.merge(commitid, set.author, set.max_date,
                      "Merge from vendor branch #{thisbranch}:\n#{logmsg}", files)
         end
+
+        record_holdoff(thisbranch, set)
 
         if fixup_branch_after(dest, thisbranch, commitid, set, file_data)
           @branchlists.each do |psym, bpl|
