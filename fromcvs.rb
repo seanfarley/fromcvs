@@ -718,10 +718,10 @@ class Repo
         bp.files[rev.file] = rev.file
       end
 
-      puts "holding off branch #{bp.name} from #{branch}"
-      set.each do |rev|
-        puts "\t#{rev.file}:#{rev.rev}"
-      end
+      #puts "holding off branch #{bp.name} from #{branch}"
+      #set.each do |rev|
+      #  puts "\t#{rev.file}:#{rev.rev}"
+      #end
 
       # We have to recurse on all child branches as well
       record_holdoff(bp.name, set)
