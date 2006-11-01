@@ -280,8 +280,10 @@ class Repo
 
   def initialize(cvsroot, modul, status=nil)
     @status = status || lambda {|m|}
-    @cvsroot = cvsroot.chomp(File::SEPARATOR)
-    @modul = modul
+    @cvsroot = cvsroot.dup
+    while @cvsroot.chomp!(File::SEPARATOR) do end
+    @modul = modul.dup
+    while @modul.chomp!(File::SEPARATOR) do end
     @path = File.join(@cvsroot, @modul)
     @expander = TagExpander.new(cvsroot)
   end
