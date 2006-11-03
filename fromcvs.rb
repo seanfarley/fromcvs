@@ -256,7 +256,11 @@ class Repo
     end
 
     def expand_Name(rev)
-      rev.syms[0]
+      if rev.syms
+        rev.syms[0]
+      else
+        ""
+      end
     end
 
     def expand_RCSfile(rev)
