@@ -528,6 +528,7 @@ class Repo
           end
         end
 
+        # Handle revs on tunk, when we are actually using a branch as HEAD
         if rf.branch
           brsplit = rf.branch.split('.')
           brrev = brsplit[0..1].join('.')
@@ -579,7 +580,17 @@ class Repo
                 if br[0..-2] == ['1', '1', '1']
                   br = nil
                 else
-                  br = rh[br.join('.')].syms[0]
+                  br = rh[br.join('.')]
+
+                  # the parent branch doesn't have a name, so we don't know
+                  # where to branch off in the first place.
+                  # I'm not sure what to do exactly, but for now hope that
+                  # another file will still have the branch name.
+                  if not br.syms
+                    rev.action ||= :branch
+                    next
+                  end
+                  br = br.syms[0]
                 end
               end
 
