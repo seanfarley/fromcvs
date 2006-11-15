@@ -107,7 +107,9 @@ class HGDestRepo
   private
   def tag(branch, node)
     @tags[branch] = node
-    @hgrepo.tag(branch, node, nil, true, nil, nil)
+    # mercurial switched the parameter order between 0.9.1 and 0.9.2 :/
+    @hgrepo.tag(Py::KW, :name=>branch, :node=>node, :local=>true,
+                :message=>nil, :user=>nil, :date=>nil)
     node
   end
 
