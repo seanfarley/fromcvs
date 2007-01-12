@@ -11,12 +11,6 @@ class HGDestRepo
 
     ui = Py.mercurial.ui.ui(Py::KW, :interactive => false)
     @hgrepo = Py.mercurial.localrepo.localrepository(ui, hgroot)
-
-    flush_tag_cache
-    @tags = @hgrepo.tags
-    unless @tags.include? 'HEAD'
-      tag('HEAD', Py.mercurial.node.nullid)
-    end
   end
 
   def last_date
@@ -27,7 +21,7 @@ class HGDestRepo
     if tag == :complete
       # XXX to be implemented
     else
-      node = @tags[tag || 'HEAD']
+      node = @hgrepo.branchtags[tag || 'HEAD']
       @hgrepo.manifest.read(@hgrepo.changelog.read(node)[0]).keys
     end
   end
@@ -36,10 +30,11 @@ class HGDestRepo
     @wlock = @hgrepo.wlock
     @transaction = @hgrepo.transaction
     @commits = 0
+    @files = []
   end
 
-  def flush
-    return if @commits < 10
+  def flush(force=false)
+    return if @commits < 10 and not force
     @hgrepo.dirstate.setparents(Py::mercurial::node::nullid)  # prevent updating the dirstate
     @transaction.close
     @transaction = @hgrepo.transaction
@@ -47,18 +42,25 @@ class HGDestRepo
   end
 
   def has_branch?(branch)
-    @tags.include? branch
+    @hgrepo.branchtags.include? branch
   end
 
-  def create_branch(branch, parent, vendor_p)
+  def create_branch(branch, parent, vendor_p, date)
+    return if @hgrepo.branchtags.include? branch
+
     if vendor_p
       node = Py.mercurial.node.nullid
+      text = "creating vendor branch #{branch}"
     else
       parent ||= 'HEAD'
-      node = @tags[parent]
+      node = @hgrepo.branchtags[parent]
       status "creating branch #{branch} from #{parent}, cset #{node.unpack('H12')}"
+      text = "creating branch #{branch} from #{parent}"
     end
-    tag(branch, node)
+
+    newnode = _commit("repo convert", date, text, [], nil, node, branch)
+    @hgrepo.branchtags[branch] = newnode    # mercurial does not keep track itself
+    newnode
   end
 
   def select_branch(branch)
@@ -71,60 +73,69 @@ class HGDestRepo
     rescue Errno::ENOENT
       # well, it is gone already
     end
+    @files << file
   end
 
   def update(file, data, mode, uid, gid)
-    @hgrepo.wwrite(file, data)
-    mode |= 0666
-    mode &= ~File.umask
-    File.chmod(mode, @hgrepo.wjoin(file))
+    if mode & 0111 != 0
+      mode = "x"
+    else
+      mode = ""
+    end
+    @hgrepo.wwrite(file, data, mode)
+    @files << file
   end
 
-  def commit(author, date, msg, files)
+  def commit(author, date, msg)
     status "committing set by #{author} at #{date} to #@curbranch"
-    _commit(author, date, msg, files)
+    node = _commit(author, date, msg, @files)
+    @files = []
+    node
   end
 
-  def merge(branch, author, date, msg, files)
+  def merge(branch, author, date, msg)
     status "merging cset #{branch.unpack('H12')[0]} by #{author} at #{date} to #@curbranch"
-    _commit(author, date, msg, files, branch)
+    node = _commit(author, date, msg, @files, branch)
+    @files = []
+    node
   end
 
   def finish
     @transaction.close
-    flush_tag_cache
     @wlock.release
   end
 
   private
-  def _commit(author, date, msg, files, p2=nil)
-    p1 = @tags[@curbranch]
-    @hgrepo.rawcommit(files, msg, author, "#{date.to_i} 0", p1, p2, @wlock)
-    @commits += 1
-    tag(@curbranch, @hgrepo.changelog.tip)
-  end
+  def _commit(author, date, msg, files, p2=nil, p1=nil, branch=nil)
+    # per default commit to @curbranch
+    p1 ||= @hgrepo.branchtags[@curbranch]
+    branch ||= @curbranch
 
-  private
-  def tag(branch, node)
-    @tags[branch] = node
-    # mercurial switched the parameter order between 0.9.1 and 0.9.2 :/
-    @hgrepo.tag(Py::KW, :name=>branch, :node=>node, :local=>true,
-                :message=>nil, :user=>nil, :date=>nil)
-    node
-  end
-
-  private
-  def flush_tag_cache
-    @tags = @hgrepo.tags
-    tf = @hgrepo.opener('localtags', 'w')
-    tf.truncate(0)
-    @tags.each do |branch, node|
-      next if branch == 'tip'
-      tf.write("#{node.unpack('H*')} #{branch}\n")
+    # if can happen that HEAD has not been created yet
+    if not p1
+      if @curbranch != "HEAD"
+        raise StandardError, "branch #{@curbranch} not yet created"
+      end
+      p1 = Py.mercurial.node.nullid
     end
-    tf.close
-    @hgrepo.reload    # just to be sure
-    @tags = @hgrepo.tags
+
+    @commits += 1
+    node = @hgrepo.rawcommit(Py::KW,
+                      :files => files,
+                      :text => msg,
+                      :user => author,
+                      :date => "#{date.to_i} 0",
+                      :p1 => p1,
+                      :p2 => p2,
+                      :wlock => @wlock,
+                      # we have to convert to a native
+                      # Python dict here, because mercurial
+                      # does extra.copy().  Actually we
+                      # could also alias #copy with #dup for
+                      # this very object.
+                      :extra => Py::dict({"branch" => branch}))
+    @hgrepo.branchtags[branch] = node   # not kept up-to-date by mercurial :/
+    node
   end
 
   def status(str)

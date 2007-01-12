@@ -2,6 +2,7 @@ require 'rcsfile'
 require 'find'
 require 'md5'
 require 'rbtree'
+require 'iconv'
 
 
 module RevSort
@@ -426,7 +427,7 @@ class Repo
             branch = rev.rev.split('.')[0..-2]
             rev.syms = sym_rev[branch]
           end
-	  rev.log = MD5.md5(rf.getlog(rev.rev)).digest
+	  rev.log = Digest::MD5::digest(rf.getlog(rev.rev))
 	  rev.author = norm_h[rev.author] ||= rev.author
 	  rev.rev = norm_h[rev.rev] ||= rev.rev
 	  rev.next = norm_h[rev.next] ||= rev.next
@@ -732,6 +733,19 @@ class Repo
     self
   end
 
+  def convtoutf8(str)
+    encs = ['utf-8', 'iso8859-15']
+
+    encs.each do |enc|
+      begin
+        return Iconv::conv('utf-8', enc, str)
+      rescue Iconv::IllegalSequence
+      end
+    end
+
+    raise RuntimeError, "cannot convert string to utf-8"
+  end
+
   def fixup_branch_before(dest, bp, date)
     return if not bp.holdoff?
 
@@ -740,7 +754,7 @@ class Repo
     return if dest.has_branch?(bp.name)
 
     bp.create_date = date
-    dest.create_branch(bp.name, bp.from, false)
+    dest.create_branch(bp.name, bp.from, false, date)
 
     # Remove files not (yet) present on the branch
     delfiles = dest.filelist(bp.from).select {|f| not bp.files.include? f}
@@ -753,7 +767,7 @@ class Repo
 
     message = "Removing files not present on branch #{bp.name}:\n\t" +
               delfiles.sort.join("\n\t")
-    dest.commit('branch fixup', date, message, delfiles)
+    dest.commit('branch fixup', date, message)
   end
 
   def fixup_branch_after(dest, branch, commitid, set)
@@ -829,14 +843,12 @@ class Repo
       logmsg = nil
     end
 
-    files = []
     revs.each do |rev|
       filename = File.join(@cvsroot, rev.rcsfile)
 
       RCSFile.open(filename) do |rf|
         logmsg = rf.getlog(rev.rev) unless logmsg
 
-        files << rev.file
         if rev.state == :dead
           dest.remove(rev.file)
         else
@@ -849,14 +861,16 @@ class Repo
       end
     end
 
+    logmsg = convtoutf8(logmsg)
+
     if logproc
       logmsg = logproc.call(logmsg)
     end
 
     if mergeid
-      dest.merge(mergeid, author, date, logmsg, files)
+      dest.merge(mergeid, author, date, logmsg)
     else
-      dest.commit(author, date, logmsg, files)
+      dest.commit(author, date, logmsg)
     end
   end
   private :commit
@@ -868,8 +882,16 @@ class Repo
 
     lastdate = Time.at(0)
 
+    totalsets = @sets.length
+    setnum = 0
+
     while set = @sets.shift
+      setnum += 1
       next if set.ignore
+
+      if setnum % 100 == 0
+        @status.call("committing set #{setnum}/#{totalsets}")
+      end
 
       # if we're in a period of silence, tell the target to flush
       if set.date - lastdate > 180
@@ -884,7 +906,7 @@ class Repo
 
         if set.ary.find{|r| [:vendor, :vendor_merge].include?(r.action)}
           if not dest.has_branch?(set.branch)
-            dest.create_branch(set.branch, nil, true)
+            dest.create_branch(set.branch, nil, true, set.max_date)
           end
         else
           fixup_branch_before(dest, bp, set.max_date)
