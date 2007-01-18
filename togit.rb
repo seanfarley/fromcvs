@@ -57,11 +57,10 @@ class GitDestRepo
   end
 
   def start
-    @packname = "import-#{Time.now.to_i}"
     @gfi = IO.popen('-', 'w')
     if not @gfi   # child
       Dir.chdir(@gitroot)
-      exec('git-fast-import', ".git/#@packname")
+      exec('git-fast-import')
       $stderr.puts "could not spawn git-fast-import"
       exit 1
     end
@@ -134,19 +133,7 @@ data #{data.size}
 
   def finish
     @gfi.close_write
-    if $?.success?
-      File.rename(File.join(@gitroot, '.git', "#@packname.pack"),
-                  File.join(@gitroot, '.git', 'objects', 'pack', "#@packname.pack"))
-      File.rename(File.join(@gitroot, '.git', "#@packname.idx"),
-                  File.join(@gitroot, '.git', 'objects', 'pack', "#@packname.idx"))
-    else
-      begin
-        File.unlink(File.join(@gitroot, '.git', "#@packname.pack"))
-        File.unlink(File.join(@gitroot, '.git', "#@packname.idx"))
-      rescue Errno::ENOENT
-      end
-      raise RuntimeError, "git-fast-import did not succeed"
-    end
+    raise RuntimeError, "git-fast-import did not succeed" if not $?.success?
   end
 
   private
