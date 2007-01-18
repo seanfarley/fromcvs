@@ -5,6 +5,30 @@ require 'rbtree'
 require 'iconv'
 
 
+module Find
+  def find_with_symlinks(*paths, &block)
+    find(*paths) do |file|
+      path_recurse = [file]
+      while file = path_recurse.shift
+        block.call(file)
+        begin
+          next unless File.lstat(file).symlink? and File.directory?(file)
+          Dir.open(file) do |dir|
+            dir.each do |f|
+              next if f == '.' or f == '..'
+              path_recurse.unshift File.join(file, f).taint
+            end
+          end
+        rescue Errno::EACCES, Errno::ENOENT
+        end
+      end
+    end
+  end
+
+  module_function :find_with_symlinks
+end
+
+
 module RevSort
   attr_accessor :max_date
 
@@ -363,7 +387,7 @@ class Repo
     branchrevs = Hash.new {|h, k| h[k] = []}
 
     lastdir = nil
-    Find.find(@path) do |f| begin
+    Find.find_with_symlinks(@path) do |f| begin
       next if f[-2..-1] != ',v'
       next if File.directory?(f)
 
