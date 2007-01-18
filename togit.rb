@@ -16,10 +16,19 @@ class GitDestRepo
 
     @deleted = []
     @modified = []
-    @mark = 0
     @from = nil
     @branchcache = {}
     @files = Hash.new{|h,k| h[k] = {}}
+
+    # Marks are not expensive (pointer sized in gfi), however
+    # keeping a mark for each blob can be a problem for large repos.
+    # To mitigate this effect, we just keep the marks for commits.
+    # Hence, the numbering scheme works as follows:
+    # - @commitmark monotonically increases.
+    # - @filemark monotonically increases *per commit*, starting from
+    #   @commitmark + 1.
+    @commitmark = 0
+    @filemark = 1
   end
 
   def last_date
@@ -106,10 +115,10 @@ class GitDestRepo
   end
 
   def update(file, data, mode, uid, gid)
-    @mark += 1
+    @filemark += 1
     @gfi.print <<-END
 blob
-mark :#@mark
+mark :#@filemark
 data #{data.size}
 #{data}
     END
@@ -119,7 +128,7 @@ data #{data.size}
     end
     mode &= ~022
     mode |= 0644
-    @modified << [_quote(file), mode, @mark]
+    @modified << [_quote(file), mode, @filemark]
     @files[@curbranch][file] = true
   end
 
@@ -139,10 +148,10 @@ data #{data.size}
   private
 
   def _commit(author, date, msg, branch=nil)
-    @mark += 1
+    @commitmark += 1
     @gfi.print <<-END
 commit refs/heads/#@curbranch
-mark :#@mark
+mark :#@commitmark
 committer #{author} <#{author}> #{date.to_i} +0000
 data #{msg.size}
 #{msg}
@@ -163,12 +172,13 @@ data #{msg.size}
     end
     @gfi.puts
 
-    @branchcache[@curbranch] = ":#@mark"
+    @branchcache[@curbranch] = ":#@commitmark"
     @deleted = []
     @modified = []
     @from = nil
+    @filemark = @commitmark + 1
 
-    @mark
+    @commitmark
   end
 
   def _command(*args)
