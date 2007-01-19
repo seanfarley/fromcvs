@@ -643,7 +643,7 @@ class Repo
           rev.action = :ignore
         end
 
-        # record when the file was introduces, we need this later
+        # record when the file was introduced, we need this later
         # to check if this file even existed when a branch happened
         @birthdates[nf] = (rev || trunkrev).date
 
