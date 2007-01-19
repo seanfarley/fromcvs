@@ -8,19 +8,20 @@ require 'iconv'
 module Find
   def find_with_symlinks(*paths, &block)
     find(*paths) do |file|
-      path_recurse = [file]
-      while file = path_recurse.shift
-        block.call(file)
-        begin
-          next unless File.lstat(file).symlink? and File.directory?(file)
-          Dir.open(file) do |dir|
-            dir.each do |f|
-              next if f == '.' or f == '..'
-              path_recurse.unshift File.join(file, f).taint
-            end
+      block.call(file)
+      recurse_paths = []
+      begin
+        next unless File.lstat(file).symlink? and File.directory?(file)
+        Dir.open(file) do |dir|
+          dir.each do |f|
+            next if f == '.' or f == '..'
+            recurse_paths << File.join(file, f)
           end
-        rescue Errno::EACCES, Errno::ENOENT
         end
+      rescue Errno::EACCES, Errno::ENOENT
+      end
+      if recurse_paths
+        find_with_symlinks(*recurse_paths, &block)
       end
     end
   end
