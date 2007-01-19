@@ -412,6 +412,10 @@ class Repo
 
       rh = {}
       RCSFile.open(f) do |rf|
+        # Some files are just bare, without any history at all (openoffice)
+        # Pretend these files do not exist.
+        next if rf.empty?
+
         trunkrev = nil    # "rev 1.2", when the vendor branch was overwritten
 
         # We reverse the branches hash
