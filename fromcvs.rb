@@ -1008,11 +1008,11 @@ class PrintDestRepo
     []
   end
   
-  def create_branch(branch, parent, vendor_p)
+  def create_branch(branch, parent, vendor_p, date)
     if vendor_p
       puts "Creating vendor branch #{branch}"
     else
-      puts "Branching #{branch} from #{parent or 'TRUNK'}"
+      puts "Branching #{branch} from #{parent or 'HEAD'}"
     end
     @branches[branch] = true
   end
@@ -1029,13 +1029,13 @@ class PrintDestRepo
     #puts "\t#{file} #{mode}"
   end
 
-  def commit(author, date, msg, files)
-    puts "set by #{author} on #{date} on #{@curbranch or 'TRUNK'}"
+  def commit(author, date, msg)
+    puts "set by #{author} on #{date} on #{@curbranch or 'HEAD'}"
     @curbranch
   end
 
   def merge(branch, author, date, msg, files)
-    puts "merge set from #{branch} by #{author} on #{date} on #{@curbranch or 'TRUNK'}"
+    puts "merge set from #{branch} by #{author} on #{date} on #{@curbranch or 'HEAD'}"
   end
 
   def finish
