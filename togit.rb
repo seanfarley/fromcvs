@@ -2,6 +2,9 @@ require 'fromcvs'
 
 require 'enumerator'
 
+
+module FromCVS
+
 # We are outputting a git-fast-import stream
 
 class GitDestRepo
@@ -222,7 +225,11 @@ if $0 == __FILE__
 
   cvsdir, modul, gitdir = ARGV
 
-  cvsrepo = Repo.new(cvsdir, modul, status)
   gitrepo = GitDestRepo.new(gitdir, status)
-  cvsrepo.convert(gitrepo)
+  cvsrepo = Repo.new(cvsdir, gitrepo.last_date.succ)
+  cvsrepo.status = status
+  cvsrepo.scan(modul)
+  cvsrepo.commit_sets(gitrepo)
 end
+
+end     # module FromCVS

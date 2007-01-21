@@ -4,6 +4,7 @@ require 'python'
 require 'python/mercurial/ui'
 require 'python/mercurial/localrepo'
 
+module FromCVS
 
 class HGDestRepo
   def initialize(hgroot, status=lambda{|s|})
@@ -156,7 +157,11 @@ if $0 == __FILE__
 
   cvsdir, modul, hgdir = ARGV
 
-  cvsrepo = Repo.new(cvsdir, modul, status)
   hgrepo = HGDestRepo.new(hgdir, status)
-  cvsrepo.convert(hgrepo)
+  cvsrepo = Repo.new(cvsdir, hgrepo.last_date.succ)
+  cvsrepo.status = status
+  cvsrepo.scan(modul)
+  cvsrepo.commit_sets(hgrepo)
 end
+
+end   # module FromCVS
