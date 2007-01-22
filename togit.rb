@@ -89,7 +89,11 @@ class GitDestRepo
   end
 
   def has_branch?(branch)
-    @branchcache.has_key?(branch)
+    @branchcache.has_key?(branch || 'master')
+  end
+
+  def branch_id(branch)
+    @branchcache[branch || 'master']
   end
 
   # This requires that no commits happen to the parent before

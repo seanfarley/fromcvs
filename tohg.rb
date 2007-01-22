@@ -43,7 +43,11 @@ class HGDestRepo
   end
 
   def has_branch?(branch)
-    @hgrepo.branchtags.include? branch
+    @hgrepo.branchtags.include?(branch || 'HEAD')
+  end
+
+  def branch_id(branch)
+    @hgrepo.branchtags[branch || 'HEAD']
   end
 
   def create_branch(branch, parent, vendor_p, date)
