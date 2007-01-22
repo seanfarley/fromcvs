@@ -95,13 +95,18 @@ class GitDestRepo
   # This requires that no commits happen to the parent before
   # we don't commit to the new branch
   def create_branch(branch, parent, vendor_p, date)
+    parent ||= 'master'
+
     if @branchcache.has_key?(branch)
       raise RuntimeError, "creating existant branch"
     end
 
     @gfi.puts "reset refs/heads/#{branch}"
-    if not vendor_p
-      parent ||= 'master'
+
+    # branchcache[parent] can be nil, because we could
+    # happen to branch before the first commit.
+    # In this case, we're a new branch like a vendor branch.
+    if not vendor_p and @branchcache[parent]
       @gfi.puts "from #{@branchcache[parent]}"
     end
     @gfi.puts
