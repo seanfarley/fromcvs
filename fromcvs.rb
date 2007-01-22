@@ -482,10 +482,9 @@ class Repo
           next
         end
 
-        # Add this rev unless:
-        # - the branch rev is dead (no use adding a dead file)
-        # - the first rev "was added on branch" (will be ignored later)
-        next if br.state == :dead
+        # Add this rev unless the first rev "was added on branch"
+        # (will be :ignored later)
+
         # get first rev of branch
         frev = rh[br.branches.find {|r| r.split('.')[0..-2] == rev}]
         next if frev && frev.date == br.date && frev.state == :dead
