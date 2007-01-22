@@ -941,7 +941,7 @@ class PrintDestRepo
     @curbranch
   end
 
-  def merge(branch, author, date, msg, files)
+  def merge(branch, author, date, msg)
     puts "merge set from #{branch} by #{author} on #{date} on #{@curbranch or 'HEAD'}"
   end
 
