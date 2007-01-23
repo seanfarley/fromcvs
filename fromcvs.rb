@@ -249,16 +249,17 @@ class Repo
 
   attr_accessor :status
 
-  def initialize(cvsroot, from_date=Time.at(0), filelist=nil)
+  def initialize(cvsroot, destrepo)
     @status = lambda {|m|}
     @cvsroot = cvsroot.dup
     while @cvsroot.chomp!(File::SEPARATOR) do end
     @expander = TagExpander.new(cvsroot)
 
-    @from_date = from_date
+    @destrepo = destrepo
+    @from_date = @destrepo.last_date.succ
 
     # Handling of repo surgery
-    if filelist
+    if filelist = @destrepo.filelist(:complete)
       @known_files = {}
       @added_files = []
       filelist.each {|v| @known_files[v] = true}
@@ -684,31 +685,31 @@ class Repo
     raise RuntimeError, "cannot convert string to utf-8"
   end
 
-  def fixup_branch_before(dest, bp, date)
+  def fixup_branch_before(bp, date)
     return if not bp.holdoff?
 
     bp.state_transition(:created)
 
-    return if dest.has_branch?(bp.name)
+    return if @destrepo.has_branch?(bp.name)
 
     bp.create_date = date
-    dest.create_branch(bp.name, bp.from, false, date)
+    @destrepo.create_branch(bp.name, bp.from, false, date)
 
     # Remove files not (yet) present on the branch
-    delfiles = dest.filelist(bp.from).select {|f| not bp.files.include? f}
+    delfiles = @destrepo.filelist(bp.from).select {|f| not bp.files.include? f}
     return if delfiles.empty?
 
-    dest.select_branch(bp.name)
+    @destrepo.select_branch(bp.name)
     delfiles.each do |f|
-      dest.remove(f)
+      @destrepo.remove(f)
     end
 
     message = "Removing files not present on branch #{bp.name}:\n\t" +
               delfiles.sort.join("\n\t")
-    dest.commit('branch fixup', date, message)
+    @destrepo.commit('branch fixup', date, message)
   end
 
-  def fixup_branch_after(dest, branch, commitid, set)
+  def fixup_branch_after(branch, commitid, set)
     # If neccessary, merge parent branch revs to the child branches
     # We need to recurse to reach all child branches
     cleanbl = false
@@ -730,7 +731,7 @@ class Repo
       # Only bother if we are merging
       next unless merging
 
-      dest.select_branch(bp.name)
+      @destrepo.select_branch(bp.name)
 
       # If this file was introduced after the branch, we are dealing
       # with a FIXCVS issue which was addressed only recently.
@@ -745,10 +746,10 @@ class Repo
 
       message = "Add files from parent branch #{branch || 'HEAD'}:\n\t" +
                 commitrevs.collect{|r| r.file}.sort.join("\n\t")
-      parentid = commit(dest, 'branch fixup', set.max_date, commitrevs,
+      parentid = commit('branch fixup', set.max_date, commitrevs,
                  message, commitid)
 
-      cleanbl |= fixup_branch_after(dest, bp.name, parentid, set)
+      cleanbl |= fixup_branch_after(bp.name, parentid, set)
     end
 
     cleanbl
@@ -775,26 +776,30 @@ class Repo
     end
   end
 
-  def commit(dest, author, date, revs, logmsg=nil, mergeid=nil)
+  def commit(author, date, revs, logmsg=nil, mergeid=nil)
     if logmsg.respond_to?(:call)
       logproc = logmsg
       logmsg = nil
     end
 
-    revs.each do |rev|
-      filename = File.join(@cvsroot, rev.rcsfile)
+    catch :out do
+      revs.each do |rev|
+        filename = File.join(@cvsroot, rev.rcsfile)
 
-      RCSFile.open(filename) do |rf|
-        logmsg = rf.getlog(rev.rev) unless logmsg
+        RCSFile.open(filename) do |rf|
+          logmsg = rf.getlog(rev.rev) unless logmsg
 
-        if rev.state == :dead
-          dest.remove(rev.file, rev)
-        else
-          data = rf.checkout(rev.rev)
-          @expander.expand!(data, rf.expand, rev)
-          stat = File.stat(filename)
-          dest.update(rev.file, data, stat.mode, stat.uid, stat.gid, rev)
-          data.replace ''
+          throw :out if not @destrepo.revs_with_cset
+
+          if rev.state == :dead
+            @destrepo.remove(rev.file, rev)
+          else
+            data = rf.checkout(rev.rev)
+            @expander.expand!(data, rf.expand, rev)
+            stat = File.stat(filename)
+            @destrepo.update(rev.file, data, stat.mode, stat.uid, stat.gid, rev)
+            data.replace ''
+          end
         end
       end
     end
@@ -806,15 +811,15 @@ class Repo
     end
 
     if mergeid
-      dest.merge(mergeid, author, date, logmsg)
+      @destrepo.merge(mergeid, author, date, logmsg, revs)
     else
-      dest.commit(author, date, logmsg)
+      @destrepo.commit(author, date, logmsg, revs)
     end
   end
   private :commit
 
-  def commit_sets(dest)
-    dest.start
+  def commit_sets
+    @destrepo.start
 
     # XXX First handle possible repo surgery
 
@@ -833,7 +838,7 @@ class Repo
 
       # if we're in a period of silence, tell the target to flush
       if set.date - lastdate > 180
-        dest.flush
+        @destrepo.flush
       end
       if lastdate < set.max_date
         lastdate = set.max_date
@@ -843,11 +848,11 @@ class Repo
         bp = @branchpoints[set.branch]
 
         if set.ary.find{|r| [:vendor, :vendor_merge].include?(r.action)}
-          if not dest.has_branch?(set.branch)
-            dest.create_branch(set.branch, nil, true, set.max_date)
+          if not @destrepo.has_branch?(set.branch)
+            @destrepo.create_branch(set.branch, nil, true, set.max_date)
           end
         else
-          fixup_branch_before(dest, bp, set.max_date)
+          fixup_branch_before(bp, set.max_date)
         end
       end
 
@@ -856,42 +861,45 @@ class Repo
       @branchlists[set.branch].each do |bp|
         next unless bp.holdoff?
         if set.ary.find {|rev| bp.files.include? rev.file}
-          fixup_branch_before(dest, bp, set.max_date)
+          fixup_branch_before(bp, set.max_date)
         end
       end
 
-      dest.select_branch(set.branch)
+      @destrepo.select_branch(set.branch)
       curbranch = set.branch
 
       # We commit with max_date, so that later the backend
       # is able to tell us the last point of silence.
-      commitid = commit(dest, set.author, set.max_date, set.ary)
+      commitid = commit(set.author, set.max_date, set.ary)
 
       merge_revs = set.ary.select{|r| [:branch_merge, :vendor_merge].include?(r.action)}
       if not merge_revs.empty?
-        dest.select_branch(nil)
+        @destrepo.select_branch(nil)
         curbranch = nil
 
-        commit(dest, set.author, set.max_date, merge_revs,
+        commit(set.author, set.max_date, merge_revs,
                    lambda {|m| "Merge from vendor branch #{set.branch}:\n#{m}"},
                    commitid)
       end
 
       record_holdoff(curbranch, set)
 
-      if fixup_branch_after(dest, curbranch, commitid, set)
+      if fixup_branch_after(curbranch, commitid, set)
         @branchlists.each do |psym, bpl|
           bpl.delete_if {|bp| bp.branched?}
         end
       end
     end
 
-    dest.finish
+    @destrepo.finish
   end
 end
 
 
 class PrintDestRepo
+  attr_reader :revs_with_cset
+  attr_reader :revs_per_file
+
   def initialize
     @branches = {}
   end
@@ -927,20 +935,20 @@ class PrintDestRepo
     @curbranch = branch
   end
 
-  def remove(file)
+  def remove(file, rev)
     #puts "\tremoving #{file}"
   end
 
-  def update(file, data, mode, uid, gid)
+  def update(file, data, mode, uid, gid, rev)
     #puts "\t#{file} #{mode}"
   end
 
-  def commit(author, date, msg)
+  def commit(author, date, msg, revs)
     puts "set by #{author} on #{date} on #{@curbranch or 'HEAD'}"
     @curbranch
   end
 
-  def merge(branch, author, date, msg)
+  def merge(branch, author, date, msg, revs)
     puts "merge set from #{branch} by #{author} on #{date} on #{@curbranch or 'HEAD'}"
   end
 
@@ -951,16 +959,16 @@ end
 if $0 == __FILE__
   require 'time'
 
-  repo = Repo.new(ARGV[0])
+  printrepo = PrintDestRepo.new
+  repo = Repo.new(ARGV[0], printrepo)
   repo.status = lambda {|m| puts m}
 ##  starttime = Time.at(0)
 ##  if ARGV[1]
 ##    starttime = Time.parse(ARGV[1])
 ##  end
-  printrepo = PrintDestRepo.new
 
   repo.scan(ARGV[1])
-  repo.commit_sets(printrepo)
+  repo.commit_sets
 
   exit 0
 

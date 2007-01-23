@@ -8,7 +8,12 @@ module FromCVS
 # We are outputting a git-fast-import stream
 
 class GitDestRepo
+  attr_reader :revs_with_cset
+  attr_reader :revs_per_file
+
   def initialize(gitroot, status=lambda{|s|})
+    revs_per_file = false
+    revs_with_cset = true
     @status = status
 
     @gitroot = gitroot
@@ -144,11 +149,11 @@ data #{data.size}
     @files[@curbranch][file] = true
   end
 
-  def commit(author, date, msg)
+  def commit(author, date, msg, revs)
     _commit(author, date, msg)
   end
 
-  def merge(branch, author, date, msg)
+  def merge(branch, author, date, msg, revs)
     _commit(author, date, msg, branch)
   end
 
@@ -235,10 +240,10 @@ if $0 == __FILE__
   cvsdir, modul, gitdir = ARGV
 
   gitrepo = GitDestRepo.new(gitdir, status)
-  cvsrepo = Repo.new(cvsdir, gitrepo.last_date.succ)
+  cvsrepo = Repo.new(cvsdir, gitrepo)
   cvsrepo.status = status
   cvsrepo.scan(modul)
-  cvsrepo.commit_sets(gitrepo)
+  cvsrepo.commit_sets
 end
 
 end     # module FromCVS

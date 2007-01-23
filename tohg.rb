@@ -7,7 +7,12 @@ require 'python/mercurial/localrepo'
 module FromCVS
 
 class HGDestRepo
+  attr_reader :revs_with_cset
+  attr_reader :revs_per_file
+
   def initialize(hgroot, status=lambda{|s|})
+    revs_per_file = false
+    revs_with_cset = true
     @status = status
 
     ui = Py.mercurial.ui.ui(Py::KW, :interactive => false)
@@ -91,14 +96,14 @@ class HGDestRepo
     @files << file
   end
 
-  def commit(author, date, msg)
+  def commit(author, date, msg, revs)
     status "committing set by #{author} at #{date} to #@curbranch"
     node = _commit(author, date, msg, @files)
     @files = []
     node
   end
 
-  def merge(branch, author, date, msg)
+  def merge(branch, author, date, msg, revs)
     status "merging cset #{branch.unpack('H12')[0]} by #{author} at #{date} to #@curbranch"
     node = _commit(author, date, msg, @files, branch)
     @files = []
@@ -162,10 +167,10 @@ if $0 == __FILE__
   cvsdir, modul, hgdir = ARGV
 
   hgrepo = HGDestRepo.new(hgdir, status)
-  cvsrepo = Repo.new(cvsdir, hgrepo.last_date.succ)
+  cvsrepo = Repo.new(cvsdir, hgrepo)
   cvsrepo.status = status
   cvsrepo.scan(modul)
-  cvsrepo.commit_sets(hgrepo)
+  cvsrepo.commit_sets
 end
 
 end   # module FromCVS

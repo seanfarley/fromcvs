@@ -37,8 +37,13 @@ class DbDestRepo
   end
 
   attr_reader :path
+  attr_reader :revs_with_cset
+  attr_reader :revs_per_file
 
   def initialize(dbfile, create, path, modules, status=lambda{|s|})
+    revs_per_file = false
+    revs_with_cset = false
+
     if not create and not File.exists?(dbfile)
       raise Errno::ENOENT, dbfile
     end
@@ -150,7 +155,7 @@ class DbDestRepo
     @files << rev
   end
 
-  def commit(author, date, msg)
+  def commit(author, date, msg, revs)
     @db.execute('INSERT INTO cset VALUES ( NULL, :branch, :author, :date )',
                 ':branch' => @curbranch,
                 ':author' => author,
@@ -174,7 +179,7 @@ class DbDestRepo
     @files = []
   end
 
-  def merge(branch, author, date, msg)
+  def merge(branch, author, date, msg, revs)
     # ignore merges to trunk for now
     raise RuntimeError, "invalid merge to non-trunk" if @curbranch
   end

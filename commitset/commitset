@@ -79,12 +79,12 @@ if dobuild
     dbr = FromCVS::DbDestRepo.open(dbfile, status)
     modules = dbr.module_list
   end
-  cvsr = FromCVS::Repo.new(dbr.path, dbr.last_date.succ)
+  cvsr = FromCVS::Repo.new(dbr.path, dbr)
   cvsr.status = status
   modules.each do |modul|
     cvsr.scan(modul, modul)
   end
-  cvsr.commit_sets(dbr)
+  cvsr.commit_sets
 
   exit 0 if ARGV.length == 0
 end
