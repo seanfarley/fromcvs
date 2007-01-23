@@ -55,6 +55,7 @@ class DbDestRepo
     else
       @path = @db.get_first_value('SELECT value FROM meta WHERE key = "path"')
     end
+    @db.execute('PRAGMA synchronous = OFF')
 
     @files = []
   end
