@@ -56,8 +56,6 @@ class DbDestRepo
       @path = @db.get_first_value('SELECT value FROM meta WHERE key = "path"')
     end
     @db.execute('PRAGMA synchronous = OFF')
-
-    @files = []
   end
 
   def _init_schema(modules)
@@ -149,14 +147,15 @@ class DbDestRepo
   end
 
   def remove(file, rev)
-    @files << rev
   end
 
   def update(file, data, mode, uid, gid, rev)
-    @files << rev
   end
 
   def commit(author, date, msg, revs)
+    # we don't want a real repo with branches
+    return if author == 'branch fixup'
+
     @db.execute('INSERT INTO cset VALUES ( NULL, :branch, :author, :date )',
                 ':branch' => @curbranch,
                 ':author' => author,
@@ -164,7 +163,7 @@ class DbDestRepo
                )
     cset_id = @db.last_insert_row_id
 
-    @files.each do |rev|
+    revs.each do |rev|
       fid = @db.get_first_value('SELECT file_id FROM file WHERE path = ?', rev.file)
       unless fid
         @db.execute('INSERT INTO file VALUES ( NULL, ? )', rev.file)
@@ -177,7 +176,6 @@ class DbDestRepo
                   ':cset_id' => cset_id
                  )
     end
-    @files = []
   end
 
   def merge(branch, author, date, msg, revs)
