@@ -181,8 +181,9 @@ class DbDestRepo
   end
 
   def merge(branch, author, date, msg, revs)
-    # ignore merges to trunk for now
-    raise RuntimeError, "invalid merge to non-trunk" if @curbranch
+    # ignore merges, they are either branch->trunk
+    # or forward merges to child branches.
+    # in either case, there are no new revs involved.
   end
 
   def finish
