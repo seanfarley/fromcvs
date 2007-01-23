@@ -36,6 +36,8 @@ class Commitset
   end
 
   def cset(file, rev, diff=true)
+    file = file[0..-3] if file[-2..-1] == ',v'
+
     cset_id, branch, author, date = @db.get_first_row(%{
       SELECT * FROM cset WHERE cset_id = (
 	SELECT cset_id FROM rev WHERE file_id = (
