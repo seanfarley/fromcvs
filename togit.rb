@@ -121,12 +121,12 @@ class GitDestRepo
     @curbranch = _quote(branch || 'master')
   end
 
-  def remove(file)
+  def remove(file, rev)
     @deleted << _quote(file)
     @files[@curbranch].delete(file)
   end
 
-  def update(file, data, mode, uid, gid)
+  def update(file, data, mode, uid, gid, rev)
     @filemark += 1
     @gfi.print <<-END
 blob

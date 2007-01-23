@@ -788,12 +788,12 @@ class Repo
         logmsg = rf.getlog(rev.rev) unless logmsg
 
         if rev.state == :dead
-          dest.remove(rev.file)
+          dest.remove(rev.file, rev)
         else
           data = rf.checkout(rev.rev)
           @expander.expand!(data, rf.expand, rev)
           stat = File.stat(filename)
-          dest.update(rev.file, data, stat.mode, stat.uid, stat.gid)
+          dest.update(rev.file, data, stat.mode, stat.uid, stat.gid, rev)
           data.replace ''
         end
       end

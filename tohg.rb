@@ -72,7 +72,7 @@ class HGDestRepo
     @curbranch = branch || 'HEAD'
   end
 
-  def remove(file)
+  def remove(file, rev)
     begin
       File.unlink(@hgrepo.wjoin(file))
     rescue Errno::ENOENT
@@ -81,7 +81,7 @@ class HGDestRepo
     @files << file
   end
 
-  def update(file, data, mode, uid, gid)
+  def update(file, data, mode, uid, gid, rev)
     if mode & 0111 != 0
       mode = "x"
     else

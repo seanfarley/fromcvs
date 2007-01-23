@@ -1,0 +1,98 @@
+#!/usr/bin/env ruby
+
+# == Synopsis
+#
+# commitset: outputs a CVS changeset from a pre-built database
+#
+# == Usage
+#
+# commitset [-bhN] [-B path] [-D dbfile] file rev
+#
+# -b, --build-incr:
+#    Incrementally updates the database.
+#
+# -B path, --build-new path:
+#    Builds a database from the CVS repo rooted at +path+.
+#
+# -D dbfile, --db dbfile:
+#    Specifies the location of the database, instead of using
+#    +commits.db+ in the current directory.
+#
+# -M module, --module module:
+#    Specifies the cvs modules to be included in the database.
+#    Only used for -B.
+#
+# -N, --nodiff:
+#    Just output the files and revisions instead of a complete diff.
+#
+# -h, --help:
+#    This help.
+#
+#
+# commitset will search for the specified +rev+ in +file+ and output a
+# diff spanning all associated files and revisions.
+#
+
+require 'getoptlong'
+require 'rdoc/usage'
+require 'todb'
+require 'commitset'
+
+
+opts = GetoptLong.new(
+  ['--help', '-h', GetoptLong::NO_ARGUMENT],
+  ['--build-incr', '-b', GetoptLong::NO_ARGUMENT],
+  ['--build-new', '-B', GetoptLong::REQUIRED_ARGUMENT],
+  ['--db', '-D', GetoptLong::REQUIRED_ARGUMENT],
+  ['--nodiff', '-N', GetoptLong::NO_ARGUMENT],
+  ['--module', '-M', GetoptLong::REQUIRED_ARGUMENT]
+)
+
+dbfile = 'commits.db'
+dobuild = false
+rebuild = nil
+modules = []
+diff = true
+opts.each do |opt, arg|
+  case opt
+  when '--help'
+    RDoc::usage
+  when '--build-incr', '--build-new'
+    dobuild = true
+    rebuild = arg if opt == '--build-new'
+  when '--db'
+    dbfile = arg
+  when '--nodiff'
+    diff = false
+  when '--module'
+    modules << arg
+  end
+end
+
+if dobuild
+  status = lambda {|msg| puts msg}
+
+  modules << '.' if modules.empty?
+  if rebuild
+    dbr = FromCVS::DbDestRepo.create(dbfile, rebuild, modules, status)
+  else
+    dbr = FromCVS::DbDestRepo.open(dbfile, status)
+    modules = dbr.module_list
+  end
+  cvsr = FromCVS::Repo.new(dbr.path, dbr.last_date.succ)
+  cvsr.status = status
+  modules.each do |modul|
+    cvsr.scan(modul, modul)
+  end
+  cvsr.commit_sets(dbr)
+
+  exit 0 if ARGV.length == 0
+end
+
+cs = Commitset.new(dbfile)
+
+if ARGV.length != 2
+  RDoc::usage(1)
+end
+
+cs.cset(*ARGV)
