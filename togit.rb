@@ -2,6 +2,9 @@ require 'fromcvs'
 
 require 'enumerator'
 
+class RCSFile::Rev
+  attr_accessor :git_aux
+end
 
 module FromCVS
 
@@ -12,8 +15,8 @@ class GitDestRepo
   attr_reader :revs_per_file
 
   def initialize(gitroot, status=lambda{|s|})
-    @revs_per_file = false
-    @revs_with_cset = true
+    @revs_per_file = true
+    @revs_with_cset = false
     @status = status
 
     @gitroot = gitroot
@@ -24,19 +27,18 @@ class GitDestRepo
 
     @deleted = []
     @modified = []
-    @from = nil
     @branchcache = {}
     @files = Hash.new{|h,k| h[k] = {}}
 
-    # Marks are not expensive (pointer sized in gfi), however
-    # keeping a mark for each blob can be a problem for large repos.
-    # To mitigate this effect, we just keep the marks for commits.
-    # Hence, the numbering scheme works as follows:
-    # - @commitmark monotonically increases.
-    # - @filemark monotonically increases *per commit*, starting from
-    #   @commitmark + 1.
-    @commitmark = 0
-    @filemark = 1
+    @mark = 0
+
+    @gfi = IO.popen('-', 'w')
+    if not @gfi   # child
+      Dir.chdir(@gitroot)
+      exec('git-fast-import')
+      $stderr.puts "could not spawn git-fast-import"
+      exit 1
+    end
   end
 
   def last_date
@@ -74,14 +76,6 @@ class GitDestRepo
   end
 
   def start
-    @gfi = IO.popen('-', 'w')
-    if not @gfi   # child
-      Dir.chdir(@gitroot)
-      exec('git-fast-import')
-      $stderr.puts "could not spawn git-fast-import"
-      exit 1
-    end
-
     _command(*%w{git-ls-remote -h .}).split("\n").each do |line|
       sha, branch = line.split
       branch[/^.*\//] = ""
@@ -127,15 +121,14 @@ class GitDestRepo
   end
 
   def remove(file, rev)
-    @deleted << _quote(file)
-    @files[@curbranch].delete(file)
+    rev.git_aux = [_quote(file), nil, nil]
   end
 
   def update(file, data, mode, uid, gid, rev)
-    @filemark += 1
+    @mark += 1
     @gfi.print <<-END
 blob
-mark :#@filemark
+mark :#@mark
 data #{data.size}
 #{data}
     END
@@ -145,16 +138,15 @@ data #{data.size}
     end
     mode &= ~022
     mode |= 0644
-    @modified << [_quote(file), mode, @filemark]
-    @files[@curbranch][file] = true
+    rev.git_aux = [_quote(file), mode, @mark]
   end
 
   def commit(author, date, msg, revs)
-    _commit(author, date, msg)
+    _commit(author, date, msg, revs)
   end
 
   def merge(branch, author, date, msg, revs)
-    _commit(author, date, msg, branch)
+    _commit(author, date, msg, revs, branch)
   end
 
   def finish
@@ -164,11 +156,11 @@ data #{data.size}
 
   private
 
-  def _commit(author, date, msg, branch=nil)
-    @commitmark += 1
+  def _commit(author, date, msg, revs, branch=nil)
+    @mark += 1
     @gfi.print <<-END
 commit refs/heads/#@curbranch
-mark :#@commitmark
+mark :#@mark
 committer #{author} <#{author}> #{date.to_i} +0000
 data #{msg.size}
 #{msg}
@@ -181,21 +173,22 @@ data #{msg.size}
     if branch
       @gfi.puts "merge :#{branch}"
     end
-    @deleted.each do |f|
-      @gfi.puts "D #{f}"
-    end
-    @modified.each do |f, mode, mark|
-      @gfi.puts "M #{mode.to_s(8)} :#{mark} #{f}"
+    revs.each do |rev|
+      f, mode, mark = rev.git_aux
+      if mode
+        @gfi.puts "M #{mode.to_s(8)} :#{mark} #{f}"
+        @files[@curbranch][f] = true
+      else
+        @gfi.puts "D #{f}"
+        @files[@curbranch].delete(f)
+      end
+      rev.git_aux = nil
     end
     @gfi.puts
 
-    @branchcache[@curbranch] = ":#@commitmark"
-    @deleted = []
-    @modified = []
-    @from = nil
-    @filemark = @commitmark + 1
+    @branchcache[@curbranch] = ":#@mark"
 
-    @commitmark
+    @mark
   end
 
   def _command(*args)

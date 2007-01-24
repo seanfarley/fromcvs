@@ -659,7 +659,9 @@ class Repo
 
       rh.delete_if { |k, rev| rev.date < @from_date }
 
-      rh.each_value do |r|
+      # create a stable sort order.  this helps the git
+      # destination to compress more efficently.
+      rh.values.sort{|a,b| a.date <=> b.date}.each do |r|
         set = sets[r]
         if not set
           set = Set.new
@@ -667,6 +669,10 @@ class Repo
           sets[set] = set
         else
           set << r
+        end
+
+        if @destrepo.revs_per_file
+          prepare_file_rev(rf, r)
         end
       end
     end
@@ -795,15 +801,7 @@ class Repo
 
           throw :out if not @destrepo.revs_with_cset
 
-          if rev.state == :dead
-            @destrepo.remove(rev.file, rev)
-          else
-            data = rf.checkout(rev.rev)
-            @expander.expand!(data, rf.expand, rev)
-            stat = File.stat(filename)
-            @destrepo.update(rev.file, data, stat.mode, stat.uid, stat.gid, rev)
-            data.replace ''
-          end
+          prepare_file_rev(rf, rev)
         end
       end
     end
@@ -821,6 +819,18 @@ class Repo
     end
   end
   private :commit
+
+  def prepare_file_rev(rf, rev)
+    if rev.state == :dead
+      @destrepo.remove(rev.file, rev)
+    else
+      data = rf.checkout(rev.rev)
+      @expander.expand!(data, rf.expand, rev)
+      stat = File.stat(File.join(@cvsroot, rev.rcsfile))
+      @destrepo.update(rev.file, data, stat.mode, stat.uid, stat.gid, rev)
+      data.replace ''
+    end
+  end
 
   def commit_sets
     @destrepo.start
