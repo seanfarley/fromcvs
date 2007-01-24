@@ -202,11 +202,11 @@ if $0 == __FILE__
 
   cvsdir, modul, dbfile = ARGV
 
-  dbrepo = DbDestRepo.new(dbfile, status)
-  cvsrepo = Repo.new(cvsdir, gitrepo.last_date.succ)
+  dbrepo = DbDestRepo.create(dbfile, cvsdir, [modul], status)
+  cvsrepo = Repo.new(cvsdir, dbrepo)
   cvsrepo.status = status
   cvsrepo.scan(modul)
-  cvsrepo.commit_sets(gitrepo)
+  cvsrepo.commit_sets
 end
 
 end     # module FromCVS
