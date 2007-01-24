@@ -700,13 +700,17 @@ class Repo
     return if delfiles.empty?
 
     @destrepo.select_branch(bp.name)
+    revs = []
     delfiles.each do |f|
-      @destrepo.remove(f)
+      rev = RCSFile::Rev.new
+      rev.file = f
+      @destrepo.remove(f, rev)
+      revs << rev
     end
 
     message = "Removing files not present on branch #{bp.name}:\n\t" +
               delfiles.sort.join("\n\t")
-    @destrepo.commit('branch fixup', date, message)
+    @destrepo.commit('branch fixup', date, message, revs)
   end
 
   def fixup_branch_after(branch, commitid, set)
