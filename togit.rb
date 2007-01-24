@@ -12,8 +12,8 @@ class GitDestRepo
   attr_reader :revs_per_file
 
   def initialize(gitroot, status=lambda{|s|})
-    revs_per_file = false
-    revs_with_cset = true
+    @revs_per_file = false
+    @revs_with_cset = true
     @status = status
 
     @gitroot = gitroot

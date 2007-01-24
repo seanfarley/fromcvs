@@ -11,8 +11,8 @@ class HGDestRepo
   attr_reader :revs_per_file
 
   def initialize(hgroot, status=lambda{|s|})
-    revs_per_file = false
-    revs_with_cset = true
+    @revs_per_file = false
+    @revs_with_cset = true
     @status = status
 
     ui = Py.mercurial.ui.ui(Py::KW, :interactive => false)

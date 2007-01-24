@@ -41,8 +41,8 @@ class DbDestRepo
   attr_reader :revs_per_file
 
   def initialize(dbfile, create, path, modules, status=lambda{|s|})
-    revs_per_file = false
-    revs_with_cset = false
+    @revs_per_file = false
+    @revs_with_cset = false
 
     if not create and not File.exists?(dbfile)
       raise Errno::ENOENT, dbfile
