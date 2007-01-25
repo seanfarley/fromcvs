@@ -154,7 +154,7 @@ class DbDestRepo
 
   def commit(author, date, msg, revs)
     # we don't want a real repo with branches
-    return if author == 'branch fixup'
+    return if author == 'branch-fixup'
 
     @db.execute('INSERT INTO cset VALUES ( NULL, :branch, :author, :date )',
                 ':branch' => @curbranch,

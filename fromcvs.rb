@@ -253,8 +253,17 @@ class Repo
     @status = lambda {|m|}
     @cvsroot = cvsroot.dup
     while @cvsroot.chomp!(File::SEPARATOR) do end
-    @expander = TagExpander.new(cvsroot)
-
+    @expander = TagExpander.new(@cvsroot)
+    @authormap = Hash.new {|h, k| k}
+    begin
+      authors = File.read(File.join(@cvsroot, 'CVSROOT', 'authormap'))
+      authors.split(/\n/).each do |line|
+        author, full = line.split(/[\t ]+/, 2)
+        @authormap[author] = full
+      end
+    rescue
+      # oh well, no author map then.
+    end
     @destrepo = destrepo
     @from_date = @destrepo.last_date.succ
 
@@ -716,7 +725,7 @@ class Repo
 
     message = "Removing files not present on branch #{bp.name}:\n\t" +
               delfiles.sort.join("\n\t")
-    @destrepo.commit('branch fixup', date, message, revs)
+    @destrepo.commit(@authormap['branch-fixup'], date, message, revs)
   end
 
   def fixup_branch_after(branch, commitid, set)
@@ -822,9 +831,9 @@ class Repo
     end
 
     if mergeid
-      @destrepo.merge(mergeid, author, date, logmsg, revs)
+      @destrepo.merge(mergeid, @authormap[author], date, logmsg, revs)
     else
-      @destrepo.commit(author, date, logmsg, revs)
+      @destrepo.commit(@authormap[author], date, logmsg, revs)
     end
   end
   private :commit

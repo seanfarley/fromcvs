@@ -158,10 +158,14 @@ data #{data.size}
 
   def _commit(author, date, msg, revs, branch=nil)
     @mark += 1
+    if author !~ /<.+>/
+      # fake email address
+      author = "#{author} <#{author}>"
+    end
     @gfi.print <<-END
 commit refs/heads/#@curbranch
 mark :#@mark
-committer #{author} <#{author}> #{date.to_i} +0000
+committer #{author} #{date.to_i} +0000
 data #{msg.size}
 #{msg}
     END
