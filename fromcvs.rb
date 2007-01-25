@@ -786,6 +786,15 @@ class Repo
     end
   end
 
+  def create_branch(bp, date)
+    # Recurse to create parents before.
+    # I guess this is not strictly necessary, as we are
+    # not able to deduce child branches from unbranched
+    # parents (laying on the same revs), but hey.
+    create_branch(@branchpoints[bp.from], date) if bp.from
+    fixup_branch_before(bp, date)
+  end
+
   def commit(author, date, revs, logmsg=nil, mergeid=nil)
     if logmsg.respond_to?(:call)
       logproc = logmsg
@@ -903,6 +912,13 @@ class Repo
           bpl.delete_if {|bp| bp.branched?}
         end
       end
+    end
+
+    # There might be branches around which were created just recently and thus
+    # didn't experience a fixup_branch_before.  We have to do this now before
+    # we stop running.
+    @branchpoints.each_value do |bp|
+      create_branch(bp, lastdate)
     end
 
     @destrepo.finish
