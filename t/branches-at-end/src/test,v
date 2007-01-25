@@ -1,0 +1,26 @@
+head	1.1;
+access;
+symbols
+	SECOND:1.1.0.4
+	FIRST:1.1.0.2;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2007.01.25.07.01.14;	author corecode;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@one
+@
