@@ -243,7 +243,7 @@ class Repo
     end
   end
 
-  @@norm_h = {}
+  @@norm_h = Hash.new{|h, k| h[k] = k}
 
   attr_reader :sets, :sym_aliases
 
@@ -431,7 +431,7 @@ class Repo
         vs.delete_at(-2) if vs[-2] == '0'
         next unless vs.length % 2 == 1 && vs.length > 1
         sym_rev[vs] ||= []
-        sym_rev[vs].push(@@norm_h[k] ||= k)
+        sym_rev[vs].push(@@norm_h[k])
       end
       sym_rev.each_value do |sl|
         next unless sl.length > 1
@@ -459,9 +459,9 @@ class Repo
           rev.syms = sym_rev[branch]
         end
         rev.log = Digest::MD5::digest(rf.getlog(rev.rev))
-        rev.author = @@norm_h[rev.author] ||= rev.author
-        rev.rev = @@norm_h[rev.rev] ||= rev.rev
-        rev.next = @@norm_h[rev.next] ||= rev.next
+        rev.author = @@norm_h[rev.author]
+        rev.rev = @@norm_h[rev.rev]
+        rev.next = @@norm_h[rev.next]
         rev.state = rev.state.intern
 
         # the quest for trunkrev only happens on trunk (duh)
