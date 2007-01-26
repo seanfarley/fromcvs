@@ -1,0 +1,35 @@
+From CVS to * in little time
+============================
+
+Prerequisites:
+ - ruby (1.8.5 known working)
+ - fromcvs, <http://ww2.fs.ei.tum.de/~corecode/hg/fromcvs>
+ - rcsparse, <http://ww2.fs.ei.tum.de/~corecode/hg/rcsparse> (ruby module)
+ - Ruby/RBTree, <http://raa.ruby-lang.org/project/ruby-rbtree/>
+ - for git: git-fast-import, <git://repo.or.cz/git/fastimport.git/>
+ - for hg: ruby-python, <http://ww2.fs.ei.tum.de/~corecode/hg/ruby-python>
+ - for db/commitset: sqlite3 + sqlite3-ruby (available as gem)
+
+
+How to convert a CVS repo
+-------------------------
+
+There is still a nice frontend missing, so you have to invoke the scripts by
+hand.
+
+% mkdir gitdest && (cd gitdest && git init)
+% ruby togit.rb /path/to/cvsroot modulename gitdest
+% cd gitdest && git-repack -a -f -d      # optional, saves 20% or so
+
+If you want to get nice author names, create the file authormap in CVSROOT:
+
+% cat << EOF > /path/to/cvsroot/CVSROOT/authormap
+corecode	Simon 'corecode' Schubert <corecode@fs.ei.tum.de>
+jdoe		Jon H. Doe <hannidoe@example.net>
+branch-fixup	CVS repo conversion <flames@example.net>
+EOF
+
+That's about for the quickstart.  Be sure to report conversion errors or
+runtime issues (possibly due to obscure CVS repo activity) to me. 
+
+-- Simon 'corecode' Schubert <corecode@fs.ei.tum.de>
