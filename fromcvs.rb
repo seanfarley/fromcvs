@@ -668,9 +668,19 @@ class Repo
 
       rh.delete_if { |k, rev| rev.date < @from_date }
 
-      # create a stable sort order.  this helps the git
-      # destination to compress more efficently.
-      rh.values.sort{|a,b| a.date <=> b.date}.each do |r|
+      revs = rh.values
+      if @destrepo.revs_per_file
+        # Create a stable sort order.  this helps the git
+        # destination to compress more efficently.
+        # At the same time, sort by branch, so that we ideally get
+        # uninterrupted runs of history, thus helping compression.
+        revs.sort! do |a,b|
+          a = a.rev.split('.').collect{|i| i.to_i}
+          b = b.rev.split('.').collect{|i| i.to_i}
+          a <=> b
+        end
+      end
+      revs.each do |r|
         set = sets[r]
         if not set
           set = Set.new
