@@ -388,7 +388,7 @@ class Repo
         first_half.each{|r| set << r}
         queued_set = Set.new
         dups.each{|r| queued_set << r}
-        sets[queued_set] = queued_set
+        @sets[queued_set] = queued_set
       end
 
       # Repo copies:  Hate Hate Hate.  We have to deal with multiple
@@ -681,11 +681,11 @@ class Repo
         end
       end
       revs.each do |r|
-        set = sets[r]
+        set = @sets[r]
         if not set
           set = Set.new
           set << r
-          sets[set] = set
+          @sets[set] = set
         else
           set << r
         end
