@@ -37,23 +37,16 @@ module RevSort
 
   # we sort revs on branch, author, log, date
   def <=>(rhs)
-    r = _cmp(rhs)
-    return r if r != 0
+    _cmp(rhs)
+  end
 
-    def cmp_dates(d, l, h)
-      l -= 180
-      h += 180
-      if d.between?(l, h)
-        return 0
-      else
-        return d - l
-      end
-    end
-
-    if @max_date
-      return - cmp_dates(rhs.date, @date, @max_date)
+  def cmp_dates(d, l, h)
+    l -= 180
+    h += 180
+    if d.between?(l, h)
+      return 0
     else
-      return cmp_dates(@date, rhs.date, rhs.max_date || rhs.date)
+      return d - l
     end
   end
 
@@ -99,6 +92,9 @@ end
 module FromCVS
 
 class Repo
+
+  MAX_TIME_COMMIT = 180
+
   class Set
     attr_accessor :author, :date, :ignore, :branch_from, :branch_level
     attr_accessor :branch
@@ -363,14 +359,36 @@ class Repo
       @branchlists[bp.from] << bp
     end
 
-    @sets.readjust {|s1, s2| s1.date <=> s2.date}
+    # We aggregated all commits with the same author/branch/log into
+    # one set.  Now we need to split this set into "real" sets, based
+    # on maximum time betweeen dates.
+    splitsets = MultiRBTree.new
+    splitsets.readjust {|a,b| a.date <=> b.date}
+    backlog = []
+    while (set = backlog.shift) || (set = @sets.shift and set = set[0])
+      next if set.ignore
+      set.ary.sort!{|a,b| a.date <=> b.date}
+      last_date = set.ary[0].date
+      set.ary.each_with_index do |rev, idx|
+        if rev.date > last_date + MAX_TIME_COMMIT
+          older_set = Set.new
+          newer_set = Set.new
+          set.ary[0...idx].each {|r| older_set << r}
+          set.ary[idx..-1].each {|r| newer_set << r}
+          backlog << newer_set
+          set = older_set
+          break
+        end
+        last_date = rev.date
+      end
+      splitsets[set] = set
+    end
 
     @fixedsets = []
-    while set = @sets.shift and set = set[0]
+    while set = splitsets.shift and set = set[0]
       # Check if there are multiple revs hitting one file, if so, split
       # the set in two parts.
       dups = []
-      set.ary.sort!{|a, b| a.date <=> b.date}
       set.ary.inject(Hash.new(0)) do |h, rev| 
         # copy the first dup rev and then continue copying
         if h.include?(rev.file) or not dups.empty?
@@ -388,7 +406,7 @@ class Repo
         first_half.each{|r| set << r}
         queued_set = Set.new
         dups.each{|r| queued_set << r}
-        @sets[queued_set] = queued_set
+        splitsets[queued_set] = queued_set
       end
 
       # Repo copies:  Hate Hate Hate.  We have to deal with multiple
