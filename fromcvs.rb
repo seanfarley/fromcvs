@@ -37,7 +37,18 @@ module RevSort
 
   # we sort revs on branch, author, log, date
   def <=>(rhs)
-    _cmp(rhs)
+    if @commitid or rhs.commitid
+      if not @commitid && rhs.commitid
+        # one is unset, we will be different
+        r = @commitid ? 1 : -1
+      else
+        r = @commitid <=> rhs.commitid
+        r = cmp_syms(rhs) if r == 0
+      end
+      r
+    else
+      _cmp(rhs)
+    end
   end
 
   def cmp_dates(d, l, h)
@@ -61,15 +72,23 @@ module RevSort
     r = ls <=> rs
     return r if r != 0
 
+    cmp_syms(rhs)
+  end
+
+  def cmp_syms(rhs)
     ls = self.syms
     rs = rhs.syms
 
-    if !ls && !rs || (ls or []) & (rs or [])
-      r = 0
+    return 0 if !ls && !rs
+
+    ls ||= []
+    rs ||= []
+
+    if not (ls & rs).empty?
+      0
     else
-      r = (ls or []) <=> (rs or [])
+      ls <=> rs
     end
-    r
   end
 end
 
@@ -77,6 +96,7 @@ class RCSFile::Rev
   attr_accessor :file, :rcsfile
   attr_accessor :syms, :author, :branches, :state, :rev, :next
   attr_accessor :action, :link, :branch_from
+  attr_accessor :commitid
 
   include RevSort
 
@@ -101,6 +121,7 @@ class Repo
     attr_accessor :log
     attr_accessor :max_date
     attr_accessor :ary
+    attr_accessor :commitid
 
     include RevSort
 
@@ -117,11 +138,13 @@ class Repo
         @log = rev.log
         @date = rev.date
         @max_date = rev.date
+        @commitid = rev.commitid
       end
 
       add_syms(rev.syms)
 
       rev.log = @log    # save memory
+      rev.commitid = @commitid
 
       if @date > rev.date
         @date = rev.date
@@ -367,6 +390,11 @@ class Repo
     backlog = []
     while (set = backlog.shift) || (set = @sets.shift and set = set[0])
       next if set.ignore
+      # If the set has a commitid, the information is authorative
+      if set.commitid
+        splitsets[set] = set
+        next
+      end
       set.ary.sort!{|a,b| a.date <=> b.date}
       last_date = set.ary[0].date
       set.ary.each_with_index do |rev, idx|
@@ -386,27 +414,29 @@ class Repo
 
     @fixedsets = []
     while set = splitsets.shift and set = set[0]
-      # Check if there are multiple revs hitting one file, if so, split
-      # the set in two parts.
-      dups = []
-      set.ary.inject(Hash.new(0)) do |h, rev| 
-        # copy the first dup rev and then continue copying
-        if h.include?(rev.file) or not dups.empty?
-          dups << rev
+      if not set.commitid
+        # Check if there are multiple revs hitting one file, if so, split
+        # the set in two parts.
+        dups = []
+        set.ary.inject(Hash.new(0)) do |h, rev| 
+          # copy the first dup rev and then continue copying
+          if h.include?(rev.file) or not dups.empty?
+            dups << rev
+          end
+          h[rev.file] = true
+          h
         end
-        h[rev.file] = true
-        h
-      end
 
-      if not dups.empty?
-        # split into two sets, and repopulate them to get times right
-        # then queue the later set back so that it is located at the right time
-        first_half = set.ary - dups
-        set = Set.new
-        first_half.each{|r| set << r}
-        queued_set = Set.new
-        dups.each{|r| queued_set << r}
-        splitsets[queued_set] = queued_set
+        if not dups.empty?
+          # split into two sets, and repopulate them to get times right
+          # then queue the later set back so that it is located at the right time
+          first_half = set.ary - dups
+          set = Set.new
+          first_half.each{|r| set << r}
+          queued_set = Set.new
+          dups.each{|r| queued_set << r}
+          splitsets[queued_set] = queued_set
+        end
       end
 
       # Repo copies:  Hate Hate Hate.  We have to deal with multiple
@@ -908,9 +938,10 @@ class Repo
         bp = @branchpoints[set.branch]
 
         if set.ary.find{|r| [:vendor, :vendor_merge].include?(r.action)}
-          if not @destrepo.has_branch?(set.branch)
+          if not bp.holdoff? and not @destrepo.has_branch?(set.branch)
             @destrepo.create_branch(set.branch, nil, true, set.max_date)
           end
+          bp.state_transition(:created)
         else
           fixup_branch_before(bp, set.max_date)
         end
