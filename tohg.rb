@@ -92,7 +92,13 @@ class HGDestRepo
     else
       mode = ""
     end
-    @hgrepo.wwrite(file, data, mode)
+    begin
+      @hgrepo.wwrite(file, data, mode)
+    rescue Py::Exceptions::AttributeError
+      # hg 0.9.3 uses a different API :/
+      @hgrepo.wwrite(file, data)
+      Py.mercurial.util.set_exec(@hgrepo.wjoin(file), mode)
+    end
     @files << file
   end
 
@@ -130,7 +136,7 @@ class HGDestRepo
     end
 
     @commits += 1
-    node = @hgrepo.rawcommit(Py::KW,
+    node = @hgrepo.commit(Py::KW,
                       :files => files,
                       :text => msg,
                       :user => author,
