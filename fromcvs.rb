@@ -938,7 +938,7 @@ class Repo
         bp = @branchpoints[set.branch]
 
         if set.ary.find{|r| [:vendor, :vendor_merge].include?(r.action)}
-          if not bp.holdoff? and not @destrepo.has_branch?(set.branch)
+          if bp.holdoff? and not @destrepo.has_branch?(set.branch)
             @destrepo.create_branch(set.branch, nil, true, set.max_date)
           end
           bp.state_transition(:created)
