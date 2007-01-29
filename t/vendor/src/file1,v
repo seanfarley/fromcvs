@@ -1,0 +1,41 @@
+head     1.1;
+branch   1.1.1;
+access   ;
+symbols  init:1.1.1.1 start:1.1.1;
+locks    ; strict;
+comment  @# @;
+
+
+1.1
+date     2007.01.29.10.03.24;  author corecode;  state Exp;
+branches 1.1.1.1;
+next     ;
+commitid        38QQytn20g063o4s;
+
+1.1.1.1
+date     2007.01.29.10.03.24;  author corecode;  state Exp;
+branches ;
+next     ;
+commitid        38QQytn20g063o4s;
+
+
+desc
+@@
+
+
+
+1.1
+log
+@Initial revision
+@
+text
+@file1
+@
+
+
+1.1.1.1
+log
+@Import
+@
+text
+@@
