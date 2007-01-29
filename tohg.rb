@@ -105,6 +105,10 @@ class HGDestRepo
   def commit(author, date, msg, revs)
     status "committing set by #{author} at #{date} to #@curbranch"
     node = _commit(author, date, msg, @files)
+    if not node
+      raise RuntimeError, "could not commit set (%s)" %
+            revs.collect{|r| "#{r.file}:#{r.rev}"}.join(' ')
+    end
     @files = []
     node
   end
