@@ -186,7 +186,6 @@ data #{msg.size}
         @gfi.puts "D #{f}"
         @files[@curbranch].delete(f)
       end
-      rev.git_aux = nil
     end
     @gfi.puts
 
