@@ -751,7 +751,7 @@ class Repo
     encs.each do |enc|
       begin
         return Iconv::conv('utf-8', enc, str)
-      rescue Iconv::IllegalSequence
+      rescue StandardError
       end
     end
 
