@@ -20,10 +20,13 @@ class GitDestRepo
     @status = status
 
     @gitroot = gitroot
-    if not File.stat(@gitroot).directory? or
-        not File.stat(File.join(@gitroot, '.git')).directory?
+    if File.directory?(File.join(@gitroot, '.git'))
+      @gitroot = File.join(@gitroot, '.git')
+    end
+    if not File.directory?(@gitroot)
       raise Errono::ENOENT, "dest dir `#@gitroot' is no git repo"
     end
+    ENV['GIT_DIR'] = @gitroot
 
     @deleted = []
     @modified = []
@@ -34,7 +37,6 @@ class GitDestRepo
 
     @gfi = IO.popen('-', 'w')
     if not @gfi   # child
-      Dir.chdir(@gitroot)
       exec('git-fast-import')
       $stderr.puts "could not spawn git-fast-import"
       exit 1
@@ -76,8 +78,9 @@ class GitDestRepo
   end
 
   def start
-    _command(*%w{git-ls-remote -h .}).split("\n").each do |line|
-      sha, branch = line.split
+    _command(*%w{git-for-each-ref}).split("\n").each do |line|
+      sha, type, branch = line.split
+      next if type != 'commit'
       branch[/^.*\//] = ""
       @branchcache[branch] = sha
     end
@@ -197,7 +200,6 @@ data #{msg.size}
   def _command(*args)
     IO.popen('-', 'r') do |io|
       if not io # child
-        Dir.chdir(@gitroot)
         exec(*args)
       end
 
