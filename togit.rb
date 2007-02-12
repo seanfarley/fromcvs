@@ -44,7 +44,9 @@ class GitDestRepo
   end
 
   def last_date
-    log = _command(*%w{git-cat-file -p HEAD})
+    latestref = _command(*%w{git-for-each-ref --count=1 --sort=-committerdate 
+                                --format=%(refname) refs/heads})
+    log = _command('git-cat-file', '-p', latestref.strip)
     log.split("\n").each do |line|
       break if line.empty?
       line = line.split
