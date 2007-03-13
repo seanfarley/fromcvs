@@ -6,7 +6,7 @@ Prerequisites:
  - fromcvs, <http://ww2.fs.ei.tum.de/~corecode/hg/fromcvs>
  - rcsparse, <http://ww2.fs.ei.tum.de/~corecode/hg/rcsparse> (ruby module)
  - Ruby/RBTree, <http://raa.ruby-lang.org/project/ruby-rbtree/>
- - for git: git-fast-import, <git://repo.or.cz/git/fastimport.git/>
+ - for git: git-fast-import, part of git 1.5
  - for db/commitset: sqlite3 + sqlite3-ruby (available as gem)
 
 
