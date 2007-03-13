@@ -1,75 +1,126 @@
 require 'fromcvs'
+require 'fileutils'
 
-require 'python'
-require 'python/mercurial/ui'
-require 'python/mercurial/localrepo'
+# THE FOLLOWING FRAGMENT WAS COPIED FROM THE RUBY SOURCE
+# IT IS UNDER THE SAME COPYRIGHT AS THE ORIGINAL, open3.rb.
+#
+# However, I modified it to just rewire stdin and stdout.
+module Open2
+  #[stdin, stdout] = popen2(command);
+  def popen2(*cmd)
+    pw = IO::pipe   # pipe[0] for read, pipe[1] for write
+    pr = IO::pipe
+
+    pid = fork{
+      # child
+      fork{
+	# grandchild
+	pw[1].close
+	STDIN.reopen(pw[0])
+	pw[0].close
+
+	pr[0].close
+	STDOUT.reopen(pr[1])
+	pr[1].close
+
+	exec(*cmd)
+      }
+      exit!(0)
+    }
+
+    pw[0].close
+    pr[1].close
+    Process.waitpid(pid)
+    pi = [pw[1], pr[0]]
+    pw[1].sync = true
+    if defined? yield
+      begin
+	return yield(*pi)
+      ensure
+	pi.each{|p| p.close unless p.closed?}
+      end
+    end
+    pi
+  end
+  module_function :popen2
+end
+# END COPY
 
 module FromCVS
 
 class HGDestRepo
   attr_reader :revs_with_cset
   attr_reader :revs_per_file
+  attr_reader :last_date
 
   def initialize(hgroot, status=lambda{|s|})
     @revs_per_file = false
     @revs_with_cset = true
+    @hgroot = hgroot
     @status = status
 
-    ui = Py.mercurial.ui.ui(Py::KW, :interactive => false)
-    @hgrepo = Py.mercurial.localrepo.localrepository(ui, hgroot)
-  end
-
-  def last_date
-    Time.at(@hgrepo.changelog.read(@hgrepo.changelog.tip)[2][0])
-  end
-
-  def filelist(tag)
-    if tag == :complete
-      # XXX to be implemented
-    else
-      node = @hgrepo.branchtags[tag || 'HEAD']
-      @hgrepo.manifest.read(@hgrepo.changelog.read(node)[0]).keys
+    @outs, @ins = \
+      Open2.popen2('python', File.join(File.dirname($0), 'tohg.py'), hgroot)
+    @last_date = Time.at(@ins.readline.strip.to_i)
+    @branches = {}
+    while l = @ins.readline do
+      l.strip!
+      break if l.empty?
+      br, n = l.split
+      @branches[br] = n
     end
   end
 
+  def filelist(tag)
+    node = @branches[tag || 'HEAD']
+    if tag == :complete
+      # XXX implement me
+      return nil
+    end
+    @outs.puts("filelist #{node}")
+    files = []
+    while l = @ins.readline("\0") do
+      break if l == "\0"
+      files << l[0..-2]
+    end
+    @ins.readline   # eat newline
+    files
+  end
+
   def start
-    @wlock = @hgrepo.wlock
-    @transaction = @hgrepo.transaction
     @commits = 0
     @files = []
   end
 
   def flush(force=false)
     return if @commits < 10 and not force
-    @hgrepo.dirstate.setparents(Py::mercurial::node::nullid)  # prevent updating the dirstate
-    @transaction.close
-    @transaction = @hgrepo.transaction
     @commits = 0
+    @outs.puts 'flush'
   end
 
   def has_branch?(branch)
-    @hgrepo.branchtags.include?(branch || 'HEAD')
+    @branches.include?(branch || 'HEAD')
   end
 
   def branch_id(branch)
-    @hgrepo.branchtags[branch || 'HEAD']
+    @branches[branch || 'HEAD']
   end
 
   def create_branch(branch, parent, vendor_p, date)
-    return if @hgrepo.branchtags.include? branch
+    return if @branches.include? branch
 
     if vendor_p
-      node = Py.mercurial.node.nullid
+      node = '0'*40
       text = "creating vendor branch #{branch}"
     else
       parent ||= 'HEAD'
-      node = @hgrepo.branchtags[parent]
+      node = @branches[parent]
       status "creating branch #{branch} from #{parent}, cset #{node.unpack('H12')}"
       text = "creating branch #{branch} from #{parent}"
     end
 
     newnode = _commit("repo convert", date, text, [], nil, node, branch)
-    @hgrepo.branchtags[branch] = newnode    # mercurial does not keep track itself
+    @branches[branch] = newnode    # mercurial does not keep track itself
     newnode
   end
 
@@ -79,7 +130,8 @@ class HGDestRepo
 
   def remove(file, rev)
     begin
-      File.unlink(@hgrepo.wjoin(file))
+      repof = File.join(@hgroot, file)
+      File.unlink(repof)
     rescue Errno::ENOENT
       # well, it is gone already
     end
@@ -87,17 +139,12 @@ class HGDestRepo
   end
 
   def update(file, data, mode, uid, gid, rev)
-    if mode & 0111 != 0
-      mode = "x"
-    else
-      mode = ""
-    end
-    begin
-      @hgrepo.wwrite(file, data, mode)
-    rescue Py::Exceptions::AttributeError
-      # hg 0.9.3 uses a different API :/
-      @hgrepo.wwrite(file, data)
-      Py.mercurial.util.set_exec(@hgrepo.wjoin(file), mode)
+    mode |= 0666
+    mode |= 0111 if mode & 0111 != 0
+    repof = File.join(@hgroot, file)
+    FileUtils.makedirs(File.dirname(repof))
+    File.open(repof, File::CREAT|File::TRUNC|File::RDWR, mode) do |f|
+      f.write(data)
     end
     @files << file
   end
@@ -121,14 +168,13 @@ class HGDestRepo
   end
 
   def finish
-    @transaction.close
-    @wlock.release
+    @outs.puts 'finish'
   end
 
   private
   def _commit(author, date, msg, files, p2=nil, p1=nil, branch=nil)
     # per default commit to @curbranch
-    p1 ||= @hgrepo.branchtags[@curbranch]
+    p1 ||= @branches[@curbranch]
     branch ||= @curbranch
 
     # if can happen that HEAD has not been created yet
@@ -136,25 +182,24 @@ class HGDestRepo
       if @curbranch != "HEAD"
         raise StandardError, "branch #{@curbranch} not yet created"
       end
-      p1 = Py.mercurial.node.nullid
+      p1 = '0'*40
     end
 
+    @outs.puts 'commit'
+    @outs.puts author
+    @outs.puts date.to_i.to_s
+    @outs.puts "#{p1}"
+    @outs.puts "#{p2}"
+    @outs.puts branch
+    files.each do |f|
+      @outs.write("#{f}\0")
+    end
+    @outs.puts "\0"
+    @outs.puts "#{msg.size}\n#{msg}\n"
+
+    node = @ins.readline.strip
     @commits += 1
-    node = @hgrepo.commit(Py::KW,
-                      :files => files,
-                      :text => msg,
-                      :user => author,
-                      :date => "#{date.to_i} 0",
-                      :p1 => p1,
-                      :p2 => p2,
-                      :wlock => @wlock,
-                      # we have to convert to a native
-                      # Python dict here, because mercurial
-                      # does extra.copy().  Actually we
-                      # could also alias #copy with #dup for
-                      # this very object.
-                      :extra => Py::dict({"branch" => branch}))
-    @hgrepo.branchtags[branch] = node   # not kept up-to-date by mercurial :/
+    @branches[branch] = node   # not kept up-to-date by mercurial :/
     node
   end
 
