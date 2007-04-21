@@ -1,4 +1,5 @@
 import sys
+import time
 import mercurial
 from mercurial import ui, localrepo, node
 
@@ -75,6 +76,10 @@ class HgDestRepo:
                                p2 = p2,
                                wlock = self.wlock,
                                extra = {'branch': branch})
+
+        if not n:
+            raise RuntimeError, "commit by %s at %s (%s) did not succeed" % \
+                    (user, time.asctime(time.gmtime(int(date))), ", ".join(files))
 
         self.outs.write("%s\n" % node.hex(n))
         self.outs.flush()
