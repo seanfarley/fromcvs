@@ -156,7 +156,7 @@ data #{data.size}
 
   def finish
     @gfi.close_write
-    raise RuntimeError, "git-fast-import did not succeed" if not $?.success?
+    raise RuntimeError, "git-fast-import did not succeed" if $?.exitstatus != 0
   end
 
   private
