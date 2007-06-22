@@ -8,6 +8,7 @@ class TagExpander
     self.methods.select{|m| m =~ /^expand_/}.each do |kw|
       kw[/^expand_/] = ''
       @keywords[kw] = kw
+      expandkw << kw
     end
 
     configs = %w{config options}
