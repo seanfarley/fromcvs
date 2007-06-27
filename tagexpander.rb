@@ -36,7 +36,7 @@ class TagExpander
       # produce unmatchable regexp
       @kwre = Regexp.compile('$nonmatch')
     else
-      @kwre = Regexp.compile('\$('+expandkw.join('|')+')(?::[^$]*)?\$')
+      @kwre = Regexp.compile('\$('+expandkw.join('|')+')(?::.*?)?\$')
     end
   end
 
