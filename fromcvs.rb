@@ -919,66 +919,73 @@ class Repo
     setnum = 0
 
     while set = @fixedsets.shift
-      setnum += 1
-      next if set.ignore
+      begin
+        setnum += 1
+        next if set.ignore
 
-      if setnum % 100 == 0
-        @status.call("committing set #{setnum}/#{totalsets}")
-      end
+        if setnum % 100 == 0
+          @status.call("committing set #{setnum}/#{totalsets}")
+        end
 
-      # if we're in a period of silence, tell the target to flush
-      if set.date - lastdate > 180
-        @destrepo.flush
-      end
-      if lastdate < set.max_date
-        lastdate = set.max_date
-      end
+        # if we're in a period of silence, tell the target to flush
+        if set.date - lastdate > 180
+          @destrepo.flush
+        end
+        if lastdate < set.max_date
+          lastdate = set.max_date
+        end
 
-      if set.branch
-        bp = @branchpoints[set.branch]
+        if set.branch
+          bp = @branchpoints[set.branch]
 
-        if set.ary.find{|r| [:vendor, :vendor_merge].include?(r.action)}
-          if bp.holdoff? and not @destrepo.has_branch?(set.branch)
-            @destrepo.create_branch(set.branch, nil, true, set.max_date)
+          if set.ary.find{|r| [:vendor, :vendor_merge].include?(r.action)}
+            if bp.holdoff? and not @destrepo.has_branch?(set.branch)
+              @destrepo.create_branch(set.branch, nil, true, set.max_date)
+            end
+            bp.state_transition(:created)
+          else
+            fixup_branch_before(bp, set.max_date)
           end
-          bp.state_transition(:created)
-        else
-          fixup_branch_before(bp, set.max_date)
         end
-      end
 
-      # Find out if one of the revs we're going to commit breaks
-      # the holdoff state of a child branch.
-      @branchlists[set.branch].each do |bp|
-        next unless bp.holdoff?
-        if set.ary.find {|rev| bp.files.include? rev.file}
-          fixup_branch_before(bp, set.max_date)
+        # Find out if one of the revs we're going to commit breaks
+        # the holdoff state of a child branch.
+        @branchlists[set.branch].each do |bp|
+          next unless bp.holdoff?
+          if set.ary.find {|rev| bp.files.include? rev.file}
+            fixup_branch_before(bp, set.max_date)
+          end
         end
-      end
 
-      @destrepo.select_branch(set.branch)
-      curbranch = set.branch
+        @destrepo.select_branch(set.branch)
+        curbranch = set.branch
 
-      # We commit with max_date, so that later the backend
-      # is able to tell us the last point of silence.
-      commitid = commit(set.author, set.max_date, set.ary)
+        # We commit with max_date, so that later the backend
+        # is able to tell us the last point of silence.
+        commitid = commit(set.author, set.max_date, set.ary)
 
-      merge_revs = set.ary.select{|r| [:branch_merge, :vendor_merge].include?(r.action)}
-      if not merge_revs.empty?
-        @destrepo.select_branch(nil)
-        curbranch = nil
+        merge_revs = set.ary.select{|r| [:branch_merge, :vendor_merge].include?(r.action)}
+        if not merge_revs.empty?
+          @destrepo.select_branch(nil)
+          curbranch = nil
 
-        commit(set.author, set.max_date, merge_revs,
-                   lambda {|m| "Merge from vendor branch #{set.branch}:\n#{m}"},
-                   commitid)
-      end
-
-      record_holdoff(curbranch, set)
-
-      if fixup_branch_after(curbranch, commitid, set)
-        @branchlists.each do |psym, bpl|
-          bpl.delete_if {|bp| bp.branched?}
+          commit(set.author, set.max_date, merge_revs,
+                     lambda {|m| "Merge from vendor branch #{set.branch}:\n#{m}"},
+                     commitid)
         end
+
+        record_holdoff(curbranch, set)
+
+        if fixup_branch_after(curbranch, commitid, set)
+          @branchlists.each do |psym, bpl|
+            bpl.delete_if {|bp| bp.branched?}
+          end
+        end
+      rescue Exception => e
+        ne = e.exception(e.message + " while handling set [%s]" %
+                         set.ary.collect{|r| "#{r.rcsfile}:#{r.rev}"}.join(','))
+        ne.set_backtrace(e.backtrace)
+        raise ne
       end
     end
 
