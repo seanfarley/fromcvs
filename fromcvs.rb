@@ -218,6 +218,7 @@ class Repo
     attr_accessor :name
     attr_accessor :level, :from
     attr_accessor :files, :revs
+    attr_accessor :vendor
     attr_reader :state
     attr_accessor :create_date
 
@@ -225,9 +226,10 @@ class Repo
     STATE_MERGE = 1
     STATE_BRANCHED = 2
 
-    def initialize(level=-1, from=nil)
+    def initialize(level=-1, from=nil, vendor=false)
       @level = level
       @from = from
+      @vendor = vendor
       @files = {}
       @state = STATE_HOLDOFF
       @create_date = Time.at(0)
@@ -238,6 +240,7 @@ class Repo
         @level = bp.level
         @from = bp.from
       end
+      @vendor |= bp.vendor
     end
 
     def holdoff?
@@ -264,7 +267,7 @@ class Repo
 
   @@norm_h = Hash.new{|h, k| h[k] = k}
 
-  attr_reader :sets, :sym_aliases
+  attr_reader :sets, :sym_aliases, :branchlists, :branchpoints
 
   attr_accessor :status
 
@@ -367,6 +370,10 @@ class Repo
       end
     end
 
+    @branchpoints.each do |name, bp|
+      bp.name ||= name
+    end
+
     @branchrevs.each do |sym, bl|
       sym = @sym_aliases[sym][0]
       bl.uniq!
@@ -375,6 +382,9 @@ class Repo
 
       bp = @branchpoints[sym]
       bp.name = sym
+      if bp.vendor
+        bp.from = nil
+      end
       if bp.from
         bp.from = @sym_aliases[bp.from][0]
       end
@@ -484,12 +494,18 @@ class Repo
       sym_rev.each_value do |sl|
         next unless sl.length > 1
 
+        sl.sort!
+
         # record symbol aliases, merge with existing
         sl2 = sl.dup
         sl.each do |s|
           sl2 += @sym_aliases[s]
         end
         sl2.uniq!
+        sl2.sort!
+        if sl2 != @sym_aliases[sl2[0]]
+          puts "#{rcsfile} aliases #{sl.join(',')} to #{sl2.join(',')}"
+        end
         sl2.each {|s| @sym_aliases[s].replace(sl2)}
       end
 
@@ -531,12 +547,15 @@ class Repo
       # After this, we merge each branch revision to the branch until the
       # list is empty.
       sym_rev.each do |rev, sl|
-        next if rev == ['1', '1', '1']
-
         branchrev = rev[0..-2].join('.')
         br = rh[branchrev]
         if not br
           $stderr.puts "#{rcsfile}: branch symbol `#{sl[0]}' has dangling revision #{branchrev}"
+          next
+        end
+
+        if ['1.1.1', rf.branch].include?(rev.join('.'))
+          @branchpoints[sl[0]].update(BranchPoint.new(-1, nil, true))
           next
         end
 
@@ -603,6 +622,7 @@ class Repo
         # covers everything.
         # oh WELL.  old CVS seemed to add a one-second difference
         if (0..1) === rh['1.1.1.1'].date - rh['1.1'].date
+          # TODO: check log messages, somtimes the import log is empty
           rh['1.1'].action = :ignore
         end
       end
@@ -649,31 +669,38 @@ class Repo
             rev.action = :ignore
           else
             level = rev.branch_level
-            if level == 1
+            # determine the branch we branched from
+            br = rev.rev.split('.')[0..-2]
+
+            # if we "branched" from the vendor branch in the past
+            # we were effectively branching from trunk.  Adjust
+            # for this fact.
+            if ['1.1.1', rf.branch].include?(br[0,3].join('.'))
+              level -= 1
+            end
+            if level <= 1
               br = nil
             else
-              # determine the branch we branched from
-              br = rev.rev.split('.')[0..-3]
-              # if we "branched" from the vendor branch
-              # we effectively are branching from trunk
-              if br[0..-2] == ['1', '1', '1']
-                br = nil
-              else
-                br = rh[br.join('.')]
+              br = br[0..-2]
+              br = rh[br.join('.')]
 
-                # the parent branch doesn't have a name, so we don't know
-                # where to branch off in the first place.
-                # I'm not sure what to do exactly, but for now hope that
-                # another file will still have the branch name.
-                if not br.syms
-                  rev.action ||= :branch
-                  next
-                end
-                br = br.syms[0]
+              # the parent branch doesn't have a name, so we don't know
+              # where to branch off in the first place.
+              # I'm not sure what to do exactly, but for now hope that
+              # another file will still have the branch name.
+              if not br.syms
+                rev.action ||= :branch
+                next
               end
+              br = br.syms[0]
             end
 
             bpl = @branchpoints[rev.syms[0]]
+            if level > bpl.level
+              puts "upgrading #{rev.syms[0]} to #{level}/#{br}:"
+              require 'pp'
+              pp rev
+            end
             bpl.update(BranchPoint.new(level, br))
           end
           rev.action ||= :branch
@@ -1048,13 +1075,19 @@ class PrintDestRepo
     #puts "\t#{file} #{mode}"
   end
 
+  def _commit(author, date, msg, revs)
+    "by %s on %s on %s revs [%s]" %
+      [author, date, @curbranch || 'HEAD', revs.map{|e| "#{e.rcsfile}:#{e.rev}"}.join(' ')]
+  end
+
   def commit(author, date, msg, revs)
-    puts "set by #{author} on #{date} on #{@curbranch or 'HEAD'}"
+    puts "set %s" % _commit(author, date, msg, revs)
     @curbranch
   end
 
   def merge(branch, author, date, msg, revs)
-    puts "merge set from #{branch} by #{author} on #{date} on #{@curbranch or 'HEAD'}"
+    puts "merge set from %s %s" % [branch, _commit(author, date, msg, revs)]
+    @curbranch
   end
 
   def finish
@@ -1073,33 +1106,34 @@ if $0 == __FILE__
 ##  end
 
   repo.scan(ARGV[1])
-  repo.commit_sets
 
-  exit 0
-
-  repo.sets.each_value do |s|
-    print "#{s.author} #{s.date} on "
-    if s.syms
-      print "#{s.syms[0]} branching from #{s.branch_from}"
-    else
-      print "trunk"
-    end
-    if s.ignore
-      print " ignore"
-    end
-    print "\n"
-    s.each do |r|
-      print "\t#{r.file} #{r.rev} #{r.state} #{r.action}"
-      print " " + r.syms.join(',') if r.syms
-      print "\n"
-    end
-  end
-
-  repo.sym_aliases.each do |sym, a|
+  repo.sym_aliases.sort.each do |sym, a|
+    next if [sym] == a
     puts "#{sym} is equivalent to #{a.join(',')}"
   end
 
-  puts "#{repo.sets.length} sets"
+  repo.branchlists.each do |parent, l|
+    puts "%s is parent of %s" %
+      [parent || 'HEAD', l.map{|i| i.name}.join(',')]
+  end
+
+  repo.branchpoints.sort{|a,b| a[0]<=>b[0]}.each do |name, bp|
+    if bp.vendor
+      puts '%s is a vendor branch' % bp.name
+    else
+      puts '%s branches from %s (%d revs, level %d)' %
+        [bp.name,
+         bp.from || 'HEAD',
+         bp.revs ? bp.revs.length : 0,
+         bp.level]
+    end
+  end
+
+  exit 0
+
+  repo.commit_sets
+
+  exit 0
 end
 
 end   # module FromCVS
