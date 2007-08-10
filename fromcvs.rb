@@ -307,6 +307,10 @@ class Repo
     @branchrevs = Hash.new {|h, k| h[k] = []}
   end
 
+  def ignore_branch(re)
+    @ignore_branch = Regexp.new(re)
+  end
+
   def _normalize_path(path, f, prefix=nil)
     f = f[path.length+1..-1] if f.index(path) == 0
     f = f[0..-3] if f[-2..-1] == ',v'
@@ -478,37 +482,6 @@ class Repo
 
       trunkrev = nil    # "rev 1.2", when the vendor branch was overwritten
 
-      # We reverse the branches hash
-      # but as there might be more than one tag
-      # pointing to the same branch, we have to
-      # create value arrays.
-      # At the same time we ignore any non-branch tag
-      sym_rev = {}
-      rf.symbols.each_pair do |k, v|
-        vs = v.split('.')
-        vs.delete_at(-2) if vs[-2] == '0'
-        next unless vs.length % 2 == 1 && vs.length > 1
-        sym_rev[vs] ||= []
-        sym_rev[vs].push(@@norm_h[k])
-      end
-      sym_rev.each_value do |sl|
-        next unless sl.length > 1
-
-        sl.sort!
-
-        # record symbol aliases, merge with existing
-        sl2 = sl.dup
-        sl.each do |s|
-          sl2 += @sym_aliases[s]
-        end
-        sl2.uniq!
-        sl2.sort!
-        if sl2 != @sym_aliases[sl2[0]]
-          puts "#{rcsfile} aliases #{sl.join(',')} to #{sl2.join(',')}"
-        end
-        sl2.each {|s| @sym_aliases[s].replace(sl2)}
-      end
-
       rf.each_value do |rev|
         rh[rev.rev] = rev
 
@@ -518,10 +491,6 @@ class Repo
 
         rev.file = nf
         rev.rcsfile = rcsfile
-        if rev.branch_level > 0
-          branch = rev.rev.split('.')[0..-2]
-          rev.syms = sym_rev[branch]
-        end
         rev.log = Digest::MD5::digest(rf.getlog(rev.rev))
         rev.author = @@norm_h[rev.author]
         rev.rev = @@norm_h[rev.rev]
@@ -536,37 +505,123 @@ class Repo
         end
       end
 
-      # Branch handling
-      # Unfortunately branches can span multiple changesets.  To fix this,
-      # we collect the list of branch revisions (revisions where branch X
-      # branches from) per branch.
-      # When committing revisions, we hold off branching (and record the
-      # files) until we are about to change a file on the parent branch,
-      # which should already exist in the child branch, or until we are about
-      # to commit the first revision to the child branch.  
-      # After this, we merge each branch revision to the branch until the
-      # list is empty.
+      # We reverse the branches hash
+      # but as there might be more than one tag
+      # pointing to the same branch, we have to
+      # create value arrays.
+      # At the same time we ignore any non-branch tag
+      sym_rev = {}
+      rf.symbols.each_pair do |k, v|
+        # ignore branches
+        next if @ignore_branch and @ignore_branch =~ k
+
+        vs = v.split('.')
+        if vs[-2] == '0'
+          magic = 1
+          bp = vs[0..-3] + vs[-1,1]
+        else
+          magic = 0
+          bp = vs
+        end
+        if vs.length % 2 == magic || vs.length < 2
+          next
+        end
+        # If the parent doesn't exist, the symbol is bogus
+        if not rh[bp[0..-2].join('.')]
+          $stderr.puts "#{rcsfile}: branch symbol `#{k}' has dangling revision #{v}"
+          next
+        end
+        sym_rev[vs] ||= []
+        sym_rev[vs] << @@norm_h[k]
+        sym_rev[vs].sort!
+      end
+
       sym_rev.each do |rev, sl|
-        branchrev = rev[0..-2].join('.')
-        br = rh[branchrev]
-        if not br
-          $stderr.puts "#{rcsfile}: branch symbol `#{sl[0]}' has dangling revision #{branchrev}"
-          next
+        bp = rev[0..-2]
+        if bp[-1] == '0'
+          bp = bp[0..-2]
         end
 
-        if ['1.1.1', rf.branch].include?(rev.join('.'))
-          @branchpoints[sl[0]].update(BranchPoint.new(-1, nil, true))
-          next
+        vendor = false
+        level = bp.length / 2
+        # if we "branched" from the vendor branch in the past
+        # we were effectively branching from trunk.  Adjust
+        # for this fact.
+        if ['1.1.1', rf.branch].include?(bp[0,3].join('.'))
+          level -= 1
+          if ['1.1.1', rf.branch].include?(rev.join('.'))
+            vendor = true
+          end
         end
 
+        parentname = nil
+        if level > 1
+          bprev = rh[bp.join('.')]
+          # the parent branch doesn't have a name, so we don't know
+          # where to branch off in the first place.
+          # I'm not sure what to do exactly, but for now hope that
+          # another file will still have the branch name.
+          next if not bprev
+
+          parentbranch = bp[0..-2]
+          parentname = sym_rev[parentbranch]
+          if not parentname
+            parentbranch.insert(-2, '0')
+            parentname = sym_rev[parentbranch]
+          end
+          next if not parentname
+          parentname = parentname[0]
+        end
+
+        bpl = @branchpoints[sl[0]]
+        if level > bpl.level
+          puts "upgrading #{sl[0]} to #{level}/#{parentname} (#{rev.join('.')})"
+        end
+        bpl.update(BranchPoint.new(level, parentname, vendor))
+
+        if sl.length > 1
+          # record symbol aliases, merge with existing
+          sl2 = sl.dup
+          sl.each do |s|
+            sl2 += @sym_aliases[s]
+          end
+          sl2.uniq!
+          sl2.sort!
+          if sl2 != @sym_aliases[sl2[0]]
+            puts "#{rcsfile} aliases #{sl.join(',')} to #{sl2.join(',')}"
+          end
+          sl2.each {|s| @sym_aliases[s].replace(sl2)}
+        end
+
+        # Branch handling
+        # Unfortunately branches can span multiple changesets.  To fix this,
+        # we collect the list of branch revisions (revisions where branch X
+        # branches from) per branch.
+        # When committing revisions, we hold off branching (and record the
+        # files) until we are about to change a file on the parent branch,
+        # which should already exist in the child branch, or until we are about
+        # to commit the first revision to the child branch.  
+        # After this, we merge each branch revision to the branch until the
+        # list is empty.
+        #
         # Add this rev unless the first rev "was added on branch"
         # (will be :ignored later)
 
+        br = rh[bp.join('.')]
         # get first rev of branch
         frev = rh[br.branches.find {|r| r.split('.')[0..-2] == rev}]
-        next if frev && frev.date == br.date && frev.state == :dead
+        if not frev or frev.date != br.date or frev.state != :dead
+          @branchrevs[sl[0]] << br
+        end
+      end
 
-        @branchrevs[sl[0]] << br
+      sym_rev.keys.each do |rev|
+        bp = rev[0..-2]
+        if bp[-1] == '0'
+          bp = bp[0..-2]
+          sym_rev[bp] ||= sym_rev[rev]
+          sym_rev.delete(rev)
+        end
       end
 
       # What we need to do to massage the revs correctly:
@@ -598,10 +653,8 @@ class Repo
         end
 
         # some imports are without vendor symbol.  just fake one up then
-        vendor_sym = nil
-        if not sym_rev[['1','1','1']]
-          vendor_sym = ['FIX_VENDOR']
-        end
+        vendor_sym = sym_rev[['1','1','1']]
+        vendor_sym ||= ['FIX_VENDOR']
 
         # chop off all vendor branch versions since HEAD left the branch
         # of course only if we're not (again) on the branch
@@ -612,9 +665,7 @@ class Repo
           else
             rev.action = :vendor
           end
-          if vendor_sym
-            rev.syms ||= vendor_sym
-          end
+          rev.syms ||= vendor_sym
           rev = rh[rev.next]
         end
 
@@ -664,44 +715,12 @@ class Repo
 
       rh.each_value do |rev|
         if rev.branch_level > 0
+          branch = rev.rev.split('.')[0..-2]
+          rev.syms = sym_rev[branch]
+
           # if it misses a name, ignore
           if not rev.syms
             rev.action = :ignore
-          else
-            level = rev.branch_level
-            # determine the branch we branched from
-            br = rev.rev.split('.')[0..-2]
-
-            # if we "branched" from the vendor branch in the past
-            # we were effectively branching from trunk.  Adjust
-            # for this fact.
-            if ['1.1.1', rf.branch].include?(br[0,3].join('.'))
-              level -= 1
-            end
-            if level <= 1
-              br = nil
-            else
-              br = br[0..-2]
-              br = rh[br.join('.')]
-
-              # the parent branch doesn't have a name, so we don't know
-              # where to branch off in the first place.
-              # I'm not sure what to do exactly, but for now hope that
-              # another file will still have the branch name.
-              if not br.syms
-                rev.action ||= :branch
-                next
-              end
-              br = br.syms[0]
-            end
-
-            bpl = @branchpoints[rev.syms[0]]
-            if level > bpl.level
-              puts "upgrading #{rev.syms[0]} to #{level}/#{br}:"
-              require 'pp'
-              pp rev
-            end
-            bpl.update(BranchPoint.new(level, br))
           end
           rev.action ||= :branch
         end
@@ -1096,6 +1115,19 @@ end
 
 if $0 == __FILE__
   require 'time'
+  require 'getoptlong'
+
+  opts = GetoptLong.new(
+    [ '--ignore', GetoptLong::REQUIRED_ARGUMENT ]
+  )
+
+  ignore_branch = nil
+  opts.each do |opt, arg|
+    case opt
+    when '--ignore'
+      ignore_branch = arg
+    end
+  end
 
   printrepo = PrintDestRepo.new
   repo = Repo.new(ARGV[0], printrepo)
@@ -1104,6 +1136,10 @@ if $0 == __FILE__
 ##  if ARGV[1]
 ##    starttime = Time.parse(ARGV[1])
 ##  end
+
+  if ignore_branch
+    repo.ignore_branch(ignore_branch)
+  end
 
   repo.scan(ARGV[1])
 
