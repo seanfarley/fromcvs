@@ -3,6 +3,7 @@ require 'find'
 require 'md5'
 require 'rbtree'
 require 'iconv'
+require 'getoptlong'
 
 require 'tagexpander'
 
@@ -271,7 +272,28 @@ class Repo
 
   attr_accessor :status
 
-  def initialize(cvsroot, destrepo)
+  def self.parseopt(addopt)
+    opts = GetoptLong.new(
+      *([
+      [ '--ignore', GetoptLong::REQUIRED_ARGUMENT ]
+      ] + addopt)
+    )
+
+    params = {}
+
+    opts.each do |opt, arg|
+      case opt
+      when '--ignore'
+        params[:ignore] = arg
+      end
+
+      yield opt, arg    # pass on to caller
+    end
+
+    params
+  end
+
+  def initialize(cvsroot, destrepo, param={})
     @status = lambda {|m|}
     @cvsroot = cvsroot.dup
     while @cvsroot.chomp!(File::SEPARATOR) do end
@@ -305,10 +327,10 @@ class Repo
 
     # branchrevs is a Hash mapping branches to the branch start revs
     @branchrevs = Hash.new {|h, k| h[k] = []}
-  end
 
-  def ignore_branch(re)
-    @ignore_branch = Regexp.new(re)
+    if param[:ignore]
+      @ignore_branch = Regexp.new(param[:ignore])
+    end
   end
 
   def _normalize_path(path, f, prefix=nil)
@@ -1115,31 +1137,16 @@ end
 
 if $0 == __FILE__
   require 'time'
-  require 'getoptlong'
 
-  opts = GetoptLong.new(
-    [ '--ignore', GetoptLong::REQUIRED_ARGUMENT ]
-  )
-
-  ignore_branch = nil
-  opts.each do |opt, arg|
-    case opt
-    when '--ignore'
-      ignore_branch = arg
-    end
-  end
+  param = Repo.parseopt([]) {}
 
   printrepo = PrintDestRepo.new
-  repo = Repo.new(ARGV[0], printrepo)
+  repo = Repo.new(ARGV[0], printrepo, param)
   repo.status = lambda {|m| puts m}
 ##  starttime = Time.at(0)
 ##  if ARGV[1]
 ##    starttime = Time.parse(ARGV[1])
 ##  end
-
-  if ignore_branch
-    repo.ignore_branch(ignore_branch)
-  end
 
   repo.scan(ARGV[1])
 

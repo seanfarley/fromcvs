@@ -214,6 +214,8 @@ if $0 == __FILE__
     puts str
   end
 
+  params = Repo.parseopt([]) {}
+
   if ARGV.length != 3
     puts "call: tohg <cvsroot> <module> <hgdir>"
     exit 1
@@ -222,7 +224,7 @@ if $0 == __FILE__
   cvsdir, modul, hgdir = ARGV
 
   hgrepo = HGDestRepo.new(hgdir, status)
-  cvsrepo = Repo.new(cvsdir, hgrepo)
+  cvsrepo = Repo.new(cvsdir, hgrepo, params)
   cvsrepo.status = status
   cvsrepo.scan(modul)
   cvsrepo.commit_sets
