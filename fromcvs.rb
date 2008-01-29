@@ -358,7 +358,7 @@ class Repo
       end
     end
 
-    @sym_aliases.each_value do |syms|
+    @sym_aliases.values.uniq.each do |syms|
       # collect best match
       # collect branch list
       bp = BranchPoint.new
@@ -366,7 +366,7 @@ class Repo
       syms.each do |sym|
         bp.update(@branchpoints[sym])
         bl.concat(@branchrevs[sym])
-        @branchrevs[sym].replace(bl)
+        @branchrevs[sym] = bl
       end
       # and write back
       syms.each do |sym|
@@ -590,7 +590,7 @@ class Repo
           if sl2 != @sym_aliases[sl2[0]]
             puts "#{rcsfile} aliases #{sl.join(',')} to #{sl2.join(',')}"
           end
-          sl2.each {|s| @sym_aliases[s].replace(sl2)}
+          sl2.each {|s| @sym_aliases[s] = sl2}
         end
 
         # Branch handling
