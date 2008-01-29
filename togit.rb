@@ -232,6 +232,8 @@ if $0 == __FILE__
     $stderr.puts str
   end
 
+  params = Repo.parseopt([]) {}
+
   if ARGV.length != 3
     puts "call: togit <cvsroot> <module> <gitdir>"
     exit 1
@@ -240,7 +242,7 @@ if $0 == __FILE__
   cvsdir, modul, gitdir = ARGV
 
   gitrepo = GitDestRepo.new(gitdir, status)
-  cvsrepo = Repo.new(cvsdir, gitrepo)
+  cvsrepo = Repo.new(cvsdir, gitrepo, params)
   cvsrepo.status = status
   cvsrepo.scan(modul)
   cvsrepo.commit_sets

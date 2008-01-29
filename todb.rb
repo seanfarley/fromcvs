@@ -195,6 +195,8 @@ if $0 == __FILE__
     $stderr.puts str
   end
 
+  params = Repo.parseopt([]) {}
+
   if ARGV.length != 3
     puts "call: todb <cvsroot> <module> <dbfile>"
     exit 1
@@ -203,7 +205,7 @@ if $0 == __FILE__
   cvsdir, modul, dbfile = ARGV
 
   dbrepo = DbDestRepo.create(dbfile, cvsdir, [modul], status)
-  cvsrepo = Repo.new(cvsdir, dbrepo)
+  cvsrepo = Repo.new(cvsdir, dbrepo, parseopt)
   cvsrepo.status = status
   cvsrepo.scan(modul)
   cvsrepo.commit_sets
