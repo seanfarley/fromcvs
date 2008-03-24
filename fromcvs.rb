@@ -275,7 +275,8 @@ class Repo
   def self.parseopt(addopt)
     opts = GetoptLong.new(
       *([
-      [ '--ignore', GetoptLong::REQUIRED_ARGUMENT ]
+      [ '--ignore', GetoptLong::REQUIRED_ARGUMENT ],
+      [ '--mergesym', GetoptLong::NO_ARGUMENT ]
       ] + addopt)
     )
 
@@ -285,6 +286,8 @@ class Repo
       case opt
       when '--ignore'
         params[:ignore] = arg
+      when '--mergesym'
+        params[:mergesym] = true
       end
 
       yield opt, arg    # pass on to caller
@@ -330,6 +333,10 @@ class Repo
 
     if param[:ignore]
       @ignore_branch = Regexp.new(param[:ignore])
+    end
+
+    if param[:mergesym]
+      @mergesym = true
     end
   end
 
@@ -601,7 +608,7 @@ class Repo
         end
         bpl.update(BranchPoint.new(level, parentname, vendor))
 
-        if sl.length > 1
+        if sl.length > 1 and @mergesym
           # record symbol aliases, merge with existing
           sl2 = sl.dup
           sl.each do |s|
