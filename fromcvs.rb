@@ -567,9 +567,6 @@ class Repo
 
       sym_rev.each do |rev, sl|
         bp = rev[0..-2]
-        if bp[-1] == '0'
-          bp = bp[0..-2]
-        end
 
         vendor = false
         level = bp.length / 2
@@ -594,10 +591,6 @@ class Repo
 
           parentbranch = bp[0..-2]
           parentname = sym_rev[parentbranch]
-          if not parentname
-            parentbranch.insert(-2, '0')
-            parentname = sym_rev[parentbranch]
-          end
           next if not parentname
           parentname = parentname[0]
         end
@@ -641,15 +634,6 @@ class Repo
         frev = rh[br.branches.find {|r| r.split('.')[0..-2] == rev}]
         if not frev or frev.date != br.date or frev.state != :dead
           @branchrevs[sl[0]] << br
-        end
-      end
-
-      sym_rev.keys.each do |rev|
-        bp = rev[0..-2]
-        if bp[-1] == '0'
-          bp = bp[0..-2]
-          sym_rev[bp] ||= sym_rev[rev]
-          sym_rev.delete(rev)
         end
       end
 
