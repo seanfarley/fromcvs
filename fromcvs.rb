@@ -603,9 +603,9 @@ class Repo
         end
 
         bpl = @branchpoints[sl[0]]
-        if level > bpl.level
-          puts "upgrading #{sl[0]} to #{level}/#{parentname} (#{rev.join('.')})"
-        end
+        # if level > bpl.level
+        #   puts "upgrading #{sl[0]} to #{level}/#{parentname} (#{rev.join('.')})"
+        # end
         bpl.update(BranchPoint.new(level, parentname, vendor))
 
         if sl.length > 1 and @mergesym
@@ -616,9 +616,9 @@ class Repo
           end
           sl2.uniq!
           sl2.sort!
-          if sl2 != @sym_aliases[sl2[0]]
-            puts "#{rcsfile} aliases #{sl.join(',')} to #{sl2.join(',')}"
-          end
+          # if sl2 != @sym_aliases[sl2[0]]
+          #   puts "#{rcsfile} aliases #{sl.join(',')} to #{sl2.join(',')}"
+          # end
           sl2.each {|s| @sym_aliases[s] = sl2}
         end
 
