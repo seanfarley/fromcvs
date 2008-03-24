@@ -1179,8 +1179,6 @@ if $0 == __FILE__
     end
   end
 
-  exit 0
-
   repo.commit_sets
 
   exit 0
