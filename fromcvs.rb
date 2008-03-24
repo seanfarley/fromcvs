@@ -560,9 +560,9 @@ class Repo
           $stderr.puts "#{rcsfile}: branch symbol `#{k}' has dangling revision #{v}"
           next
         end
-        sym_rev[vs] ||= []
-        sym_rev[vs] << @@norm_h[k]
-        sym_rev[vs].sort!
+        sym_rev[bp] ||= []
+        sym_rev[bp] << @@norm_h[k]
+        sym_rev[bp].sort!
       end
 
       sym_rev.each do |rev, sl|
