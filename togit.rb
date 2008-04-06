@@ -41,6 +41,14 @@ class GitDestRepo
       $stderr.puts "could not spawn git-fast-import"
       exit 1
     end
+
+    _command(*%w{git-for-each-ref}).split("\n").each do |line|
+      sha, type, branch = line.split
+      next if type != 'commit'
+      branch[/^.*\//] = ""
+      @branchcache[branch] = sha
+    end
+    @pickupbranches = @branchcache.dup
   end
 
   def last_date
@@ -62,7 +70,7 @@ class GitDestRepo
 
   def filelist(tag)
     if tag == :complete
-      # XXX to be implemented
+      @branchcache.keys.map{|k| filelist(k)}.flatten.uniq
     else
       tag ||= 'master'
 
@@ -80,13 +88,6 @@ class GitDestRepo
   end
 
   def start
-    _command(*%w{git-for-each-ref}).split("\n").each do |line|
-      sha, type, branch = line.split
-      next if type != 'commit'
-      branch[/^.*\//] = ""
-      @branchcache[branch] = sha
-    end
-    @pickupbranches = @branchcache.dup
   end
 
   def flush
