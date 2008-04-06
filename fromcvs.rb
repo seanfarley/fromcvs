@@ -317,7 +317,7 @@ class Repo
     # Handling of repo surgery
     if filelist = @destrepo.filelist(:complete)
       @known_files = {}
-      @added_files = []
+      @repocopy = Hash.new{|h, k| h[k] = []}
       filelist.each {|v| @known_files[v] = true}
     end
 
@@ -763,13 +763,38 @@ class Repo
       # If the first rev is before that, it must have been repo copied
       if appeared
         firstrev = rh[rf.head]
+        copyrev = firstrev if firstrev.date < @from_date
         while firstrev.next
           firstrev = rh[firstrev.next]
+          if firstrev.date < @from_date and not copyrev
+            copyrev = firstrev
+          end
         end
         if firstrev.date < @from_date
-          revs = rh.values.select {|rev| rev.date < @from_date}
-          revs.sort! {|a, b| a.date <=> b.date}
-          @added_files << revs
+          # This file has been repo copied.  Make up a repo
+          # copy revision for each branch which was alive at time
+          # of the copy.
+          @repocopy[nil] << copyrev
+          prepare_file_rev(rf, copyrev) if @destrepo.revs_per_file
+          sym_rev.each do |r, syms|
+            br = r[0..-2].join('.')
+            br = rh[br].branches.select{|brr| brr.split('.')[0..-2] == r}[0]
+            br = rh[br]
+
+            next if not br.date < @from_date
+
+            copyrev = br
+            while br.next
+              br = rh[br.next]
+              if br.date < @from_date
+                copyrev = br
+              end
+            end
+            syms.each do |sym|
+              @repocopy[@sym_aliases[sym][0]] << copyrev
+              prepare_file_rev(rf, copyrev) if @destrepo.revs_per_file
+            end
+          end
         end
       end
 
@@ -971,6 +996,13 @@ class Repo
     @destrepo.start
 
     # XXX First handle possible repo surgery
+    @repocopy.each do |branch, revs|
+      revs.reject!{|r| r.state == :dead}
+      next if revs.empty?
+
+      @destrepo.select_branch(branch)
+      commit("repo-copy", @from_date, revs, "Repo copy files")
+    end
 
     lastdate = Time.at(0)
 
