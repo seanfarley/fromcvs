@@ -992,8 +992,29 @@ class Repo
     end
   end
 
+  def record_incremental_holdoff(branch, files)
+    @branchlists[branch].each do |bp|
+      next unless bp.holdoff?
+
+      bf = bp.revs.keys.collect{|r| r.file if r.date >= @from_date}
+
+      files.each do |f|
+        if not bf.include?(f)
+          bp.files[f] = f
+        end
+      end
+
+      record_incremental_holdoff(bp.name, files)
+    end
+  end
+
   def commit_sets
     @destrepo.start
+
+    # Prime data structures so that we know which files already exist on a branch
+    (@branchpoints.keys + [nil]).each do |bn|
+      record_incremental_holdoff(bn, @destrepo.filelist(bn))
+    end
 
     # XXX First handle possible repo surgery
     @repocopy.each do |branch, revs|
@@ -1096,8 +1117,9 @@ class PrintDestRepo
   attr_reader :revs_with_cset
   attr_reader :revs_per_file
 
-  def initialize
+  def initialize(t)
     @branches = {}
+    @t = t
   end
 
   def start
@@ -1111,7 +1133,7 @@ class PrintDestRepo
   end
 
   def last_date
-    Time.at(0)
+    @t
   end
 
   def filelist(branch)
@@ -1161,15 +1183,16 @@ end
 if $0 == __FILE__
   require 'time'
 
-  param = Repo.parseopt([]) {}
+  starttime = Time.at(0)
+  param = Repo.parseopt([
+      [ '--time', GetoptLong::REQUIRED_ARGUMENT ],
+  ]) do |opt, arg|
+    starttime = Time.parse(arg)
+  end
 
-  printrepo = PrintDestRepo.new
+  printrepo = PrintDestRepo.new(starttime)
   repo = Repo.new(ARGV[0], printrepo, param)
   repo.status = lambda {|m| puts m}
-##  starttime = Time.at(0)
-##  if ARGV[1]
-##    starttime = Time.parse(ARGV[1])
-##  end
 
   repo.scan(ARGV[1])
 
