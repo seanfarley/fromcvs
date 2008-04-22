@@ -777,19 +777,26 @@ class Repo
           @repocopy[nil] << copyrev
           prepare_file_rev(rf, copyrev) if @destrepo.revs_per_file
           sym_rev.each do |r, syms|
-            br = r[0..-2].join('.')
-            br = rh[br].branches.select{|brr| brr.split('.')[0..-2] == r}[0]
+            br = r[0..-2].join('.')   # get parent rev
+            # get branch start
             br = rh[br]
+            br2 = br.branches.select{|brr| brr.split('.')[0..-2] == r}[0]
+            if rh[br2]                # branch might be latent
+              br = rh[br2]
 
-            next if not br.date < @from_date
-
-            copyrev = br
-            while br.next
-              br = rh[br.next]
-              if br.date < @from_date
-                copyrev = br
+              copyrev = br
+              while br.next
+                br = rh[br.next]
+                if br.date < @from_date
+                  copyrev = br
+                end
               end
+            else
+              copyrev = br
             end
+
+            next if not copyrev.date < @from_date
+
             syms.each do |sym|
               @repocopy[@sym_aliases[sym][0]] << copyrev
               prepare_file_rev(rf, copyrev) if @destrepo.revs_per_file
