@@ -77,6 +77,9 @@ class HGDestRepo
       # XXX implement me
       return nil
     end
+    if not node
+      return []
+    end
     @outs.puts("filelist #{node}")
     files = []
     while l = @ins.readline("\0") do
