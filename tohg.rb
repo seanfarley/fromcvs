@@ -74,8 +74,7 @@ class HGDestRepo
   def filelist(tag)
     node = @branches[tag || 'HEAD']
     if tag == :complete
-      # XXX implement me
-      return nil
+      return @branches.map{|b, _| filelist(b)}.flatten.uniq
     end
     if not node
       return []
