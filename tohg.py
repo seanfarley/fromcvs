@@ -41,6 +41,7 @@ class HgDestRepo:
         # prevent updating the dirstate
         self.hgrepo.dirstate.setparents(node.nullid)
         self.transaction.close()
+        del self.transaction
         self.transaction = self.hgrepo.transaction()
 
     def cmd_commit(self):
@@ -74,7 +75,6 @@ class HgDestRepo:
                                date = "%s 0" % date,
                                p1 = p1,
                                p2 = p2,
-                               wlock = self.wlock,
                                extra = {'branch': branch})
 
         if not n:
@@ -86,6 +86,7 @@ class HgDestRepo:
 
     def cmd_finish(self):
         self.transaction.close()
+        del self.transaction
         self.wlock.release()
 
     def dispatch(self):
