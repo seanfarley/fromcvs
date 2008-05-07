@@ -1024,12 +1024,14 @@ class Repo
     end
 
     # XXX First handle possible repo surgery
-    @repocopy.each do |branch, revs|
-      revs.reject!{|r| r.state == :dead}
-      next if revs.empty?
+    if @repocopy
+      @repocopy.each do |branch, revs|
+        revs.reject!{|r| r.state == :dead}
+        next if revs.empty?
 
-      @destrepo.select_branch(branch)
-      commit("repo-copy", @from_date, revs, "Repo copy files")
+        @destrepo.select_branch(branch)
+        commit("repo-copy", @from_date, revs, "Repo copy files")
+      end
     end
 
     lastdate = Time.at(0)
