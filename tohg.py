@@ -29,7 +29,6 @@ class HgDestRepo:
         self.outs.flush()
 
     def cmd_filelist(self, n):
-        # XXX tag == complete
         n = node.bin(n)
         files = self.hgrepo.manifest.read(self.hgrepo.changelog.read(n)[0]).keys()
         for f in files:
