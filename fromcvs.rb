@@ -276,7 +276,8 @@ class Repo
     opts = GetoptLong.new(
       *([
       [ '--ignore', GetoptLong::REQUIRED_ARGUMENT ],
-      [ '--mergesym', GetoptLong::NO_ARGUMENT ]
+      [ '--mergesym', GetoptLong::NO_ARGUMENT ],
+      [ '--expand-mode', '-k', GetoptLong::REQUIRED_ARGUMENT]
       ] + addopt)
     )
 
@@ -288,6 +289,8 @@ class Repo
         params[:ignore] = arg
       when '--mergesym'
         params[:mergesym] = true
+      when '--expand-mode'
+        params[:expandmode] = arg
       end
 
       yield opt, arg    # pass on to caller
@@ -337,6 +340,10 @@ class Repo
 
     if param[:mergesym]
       @mergesym = true
+    end
+
+    if param[:expandmode]
+      @expandmode = param[:expandmode]
     end
   end
 
@@ -992,7 +999,16 @@ class Repo
       @destrepo.remove(rev.file, rev)
     else
       data = rf.checkout(rev.rev)
-      @expander.expand!(data, rf.expand, rev)
+      expand = rf.expand
+
+      # The user might have specified a -k
+      # however, don't let the user mutilate his binary files.  This
+      # is in conformance with CVS >= 1.12.2.
+      if @expandmode and expand != 'b'
+        expand = @expandmode
+      end
+
+      @expander.expand!(data, expand, rev)
       stat = File.stat(File.join(@cvsroot, rev.rcsfile))
       @destrepo.update(rev.file, data, stat.mode, stat.uid, stat.gid, rev)
       data.replace ''
