@@ -205,7 +205,7 @@ if $0 == __FILE__
   cvsdir, modul, dbfile = ARGV
 
   dbrepo = DbDestRepo.create(dbfile, cvsdir, [modul], status)
-  cvsrepo = Repo.new(cvsdir, dbrepo, parseopt)
+  cvsrepo = Repo.new(cvsdir, dbrepo, params)
   cvsrepo.status = status
   cvsrepo.scan(modul)
   cvsrepo.commit_sets
