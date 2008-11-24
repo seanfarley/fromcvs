@@ -1094,6 +1094,17 @@ class Repo
           end
         end
 
+        # However, if we're dealing with a merge, we also need
+        # to check for the holdoff state of HEAD's branches.
+        merge_revs = set.ary.select{|r| [:branch_merge, :vendor_merge].include?(r.action)}
+        if not merge_revs.empty?
+          @branchlists[nil].each do |bp|
+            if merge_revs.find {|rev| bp.files.include? rev.file}
+              fixup_branch_before(bp, set.max_date)
+            end
+          end
+        end
+
         @destrepo.select_branch(set.branch)
         curbranch = set.branch
 
@@ -1101,7 +1112,6 @@ class Repo
         # is able to tell us the last point of silence.
         commitid = commit(set.author, set.max_date, set.ary)
 
-        merge_revs = set.ary.select{|r| [:branch_merge, :vendor_merge].include?(r.action)}
         if not merge_revs.empty?
           @destrepo.select_branch(nil)
           curbranch = nil
