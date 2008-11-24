@@ -37,12 +37,12 @@ class GitDestRepo
 
     @gfi = IO.popen('-', 'w')
     if not @gfi   # child
-      exec('git-fast-import')
+      exec('git', 'fast-import')
       $stderr.puts "could not spawn git-fast-import"
       exit 1
     end
 
-    _command(*%w{git-for-each-ref}).split("\n").each do |line|
+    _command(*%w{git for-each-ref}).split("\n").each do |line|
       sha, type, branch = line.split
       next if type != 'commit'
       branch[/^.*\//] = ""
@@ -52,9 +52,9 @@ class GitDestRepo
   end
 
   def last_date
-    latestref = _command(*%w{git-for-each-ref --count=1 --sort=-committerdate 
+    latestref = _command(*%w{git for-each-ref --count=1 --sort=-committerdate 
                                 --format=%(refname) refs/heads})
-    log = _command('git-cat-file', '-p', latestref.strip)
+    log = _command('git', 'cat-file', '-p', latestref.strip)
     log.split("\n").each do |line|
       break if line.empty?
       line = line.split
@@ -76,7 +76,7 @@ class GitDestRepo
 
       return @files[tag].keys if @files.has_key? tag
 
-      files = _command(*(%w{git-ls-tree --name-only --full-name -r -z} +
+      files = _command(*(%w{git ls-tree --name-only --full-name -r -z} +
                          ["refs/heads/#{tag}"])).split("\0")
       files.collect! do |f|
         _unquote(f)
