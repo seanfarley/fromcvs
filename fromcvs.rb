@@ -916,8 +916,12 @@ class Repo
       # This means history is unclear as we can't reliably determine
       # if the tagging happened at the same time as the addition to
       # the branch.  For now, just assume it did.
-      commitrevs.reject!{|rev| @birthdates[rev.file] > bp.create_date}
-      next if commitrevs.empty?
+      #
+      # XXX can't reproduce for now, disabling, as it breaks some
+      # things
+      #
+      #commitrevs.reject!{|rev| @birthdates[rev.file] > bp.create_date}
+      #next if commitrevs.empty?
 
       message = "Add files from parent branch #{branch || 'HEAD'}:\n\t" +
                 commitrevs.collect{|r| r.file}.sort.join("\n\t")
