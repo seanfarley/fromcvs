@@ -926,7 +926,7 @@ class Repo
       message = "Add files from parent branch #{branch || 'HEAD'}:\n\t" +
                 commitrevs.collect{|r| r.file}.sort.join("\n\t")
       parentid = commit('branch-fixup', set.max_date, commitrevs,
-                 message, commitid)
+                 message)
 
       cleanbl |= fixup_branch_after(bp.name, parentid, set)
     end
