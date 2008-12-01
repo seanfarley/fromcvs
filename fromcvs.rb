@@ -674,7 +674,9 @@ class Repo
 
         # some imports are without vendor symbol.  just fake one up then
         vendor_sym = sym_rev[['1','1','1']]
-        vendor_sym ||= ['FIX_VENDOR']
+        if not vendor_sym
+          vendor_sym = sym_rev[['1','1','1']] = ['FIX_VENDOR']
+        end
 
         # chop off all vendor branch versions since HEAD left the branch
         # of course only if we're not (again) on the branch
