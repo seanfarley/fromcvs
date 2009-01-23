@@ -127,7 +127,7 @@ class GitDestRepo
   end
 
   def remove(file, rev)
-    rev.git_aux = [_quote(file), nil, nil]
+    rev.git_aux = [file, nil, nil]
   end
 
   def update(file, data, mode, uid, gid, rev)
@@ -144,7 +144,7 @@ data #{data.size}
     end
     mode &= ~022
     mode |= 0644
-    rev.git_aux = [_quote(file), mode, @mark]
+    rev.git_aux = [file, mode, @mark]
   end
 
   def commit(author, date, msg, revs)
@@ -185,11 +185,12 @@ data #{msg.size}
     end
     revs.each do |rev|
       f, mode, mark = rev.git_aux
+      qf = _quote(f)
       if mode
-        @gfi.puts "M #{mode.to_s(8)} :#{mark} #{f}"
+        @gfi.puts "M #{mode.to_s(8)} :#{mark} #{qf}"
         @files[@curbranch][f] = true
       else
-        @gfi.puts "D #{f}"
+        @gfi.puts "D #{qf}"
         @files[@curbranch].delete(f)
       end
     end
