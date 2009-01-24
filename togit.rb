@@ -24,7 +24,7 @@ class GitDestRepo
       @gitroot = File.join(@gitroot, '.git')
     end
     if not File.directory?(@gitroot)
-      raise Errono::ENOENT, "dest dir `#@gitroot' is no git repo"
+      raise Errno::ENOENT, "dest dir `#@gitroot' is no git repo"
     end
     ENV['GIT_DIR'] = @gitroot
 
