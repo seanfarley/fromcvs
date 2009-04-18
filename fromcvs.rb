@@ -277,7 +277,8 @@ class Repo
       *([
       [ '--ignore', GetoptLong::REQUIRED_ARGUMENT ],
       [ '--mergesym', GetoptLong::NO_ARGUMENT ],
-      [ '--expand-mode', '-k', GetoptLong::REQUIRED_ARGUMENT]
+      [ '--expand-mode', '-k', GetoptLong::REQUIRED_ARGUMENT],
+      [ '--authors', '-A', GetoptLong::REQUIRED_ARGUMENT]
       ] + addopt)
     )
 
@@ -291,6 +292,8 @@ class Repo
         params[:mergesym] = true
       when '--expand-mode'
         params[:expandmode] = arg
+      when '--authors'
+        params[:authors] = arg
       end
 
       yield opt, arg    # pass on to caller
@@ -305,14 +308,23 @@ class Repo
     while @cvsroot.chomp!(File::SEPARATOR) do end
     @expander = TagExpander.new(@cvsroot)
     @authormap = Hash.new {|h, k| k}
-    begin
-      authors = File.read(File.join(@cvsroot, 'CVSROOT', 'authormap'))
-      authors.split(/\n/).each do |line|
-        author, full = line.split(/[\t ]+/, 2)
+    if param.include?(:authors)
+      # use cvsimport format
+      File.readlines(param[:authors]).each do |line|
+        line.chomp!
+        author, full = line.split(/\s*=\s*/, 2)
         @authormap[author] = full
       end
-    rescue
-      # oh well, no author map then.
+    else
+      begin
+        authors = File.read(File.join(@cvsroot, 'CVSROOT', 'authormap'))
+        authors.split(/\n/).each do |line|
+          author, full = line.split(/[\t ]+/, 2)
+          @authormap[author] = full
+        end
+      rescue
+        # oh well, no author map then.
+      end
     end
     @destrepo = destrepo
     @from_date = @destrepo.last_date.succ
@@ -1228,7 +1240,10 @@ if $0 == __FILE__
   param = Repo.parseopt([
       [ '--time', GetoptLong::REQUIRED_ARGUMENT ],
   ]) do |opt, arg|
-    starttime = Time.parse(arg)
+    case opt
+    when '--time'
+      starttime = Time.parse(arg)
+    end
   end
 
   printrepo = PrintDestRepo.new(starttime)
