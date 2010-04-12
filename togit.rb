@@ -14,7 +14,7 @@ class GitDestRepo
   attr_reader :revs_with_cset
   attr_reader :revs_per_file
 
-  def initialize(gitroot, status=lambda{|s|})
+  def initialize(gitroot, status=lambda{|s|}, *gfiargs)
     @revs_per_file = true
     @revs_with_cset = false
     @status = status
@@ -37,7 +37,7 @@ class GitDestRepo
 
     @gfi = IO.popen('-', 'w')
     if not @gfi   # child
-      exec('git', 'fast-import')
+      exec('git', 'fast-import', *gfiargs)
       $stderr.puts "could not spawn git-fast-import"
       exit 1
     end
@@ -236,14 +236,16 @@ if $0 == __FILE__
 
   params = Repo.parseopt([]) {}
 
-  if ARGV.length != 3
-    puts "call: togit <cvsroot> <module> <gitdir>"
+  if ARGV.length < 3
+    puts "call: togit <cvsroot> <module> <gitdir> [-- *[git-fast-import arguments]]"
     exit 1
   end
 
-  cvsdir, modul, gitdir = ARGV
+  cvsdir = ARGV.shift
+  modul  = ARGV.shift
+  gitdir = ARGV.shift
 
-  gitrepo = GitDestRepo.new(gitdir, status)
+  gitrepo = GitDestRepo.new(gitdir, status, *ARGV)
   cvsrepo = Repo.new(cvsdir, gitrepo, params)
   cvsrepo.status = status
   cvsrepo.scan(modul)
