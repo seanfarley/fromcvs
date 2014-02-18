@@ -21,7 +21,8 @@ class TagExpander
     @cvsroot = cvsroot
     @keywords = {}
     expandkw = []
-    self.methods.select{|m| m =~ /^expand_/}.each do |kw|
+    self.methods.select{|m| m.to_s =~ /^expand_/}.each do |kw|
+      kw = kw.to_s
       kw[/^expand_/] = ''
       @keywords[kw] = kw
       expandkw << kw

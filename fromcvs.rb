@@ -16,7 +16,7 @@
 
 require 'rcsfile'
 require 'find'
-require 'md5'
+require 'digest/md5'
 require 'rbtree'
 require 'iconv'
 require 'getoptlong'
