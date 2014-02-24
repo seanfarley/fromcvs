@@ -151,7 +151,7 @@ class GitDestRepo
     @gfi.print <<-END
 blob
 mark :#@mark
-data #{data.size}
+data #{data.bytesize}
 #{data}
     END
     # Fix up mode for git
@@ -188,7 +188,7 @@ data #{data.size}
 commit refs/heads/#@curbranch
 mark :#@mark
 committer #{author} #{date.to_i} +0000
-data #{msg.size}
+data #{msg.bytesize}
 #{msg}
     END
     if @pickupbranches.has_key? @curbranch

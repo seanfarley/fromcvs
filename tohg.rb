@@ -213,7 +213,7 @@ class HGDestRepo
       @outs.write("#{f}\0")
     end
     @outs.puts "\0"
-    @outs.puts "#{msg.size}\n#{msg}\n"
+    @outs.puts "#{msg.bytesize}\n#{msg}\n"
 
     node = @ins.readline.strip
     @commits += 1
