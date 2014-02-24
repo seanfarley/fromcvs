@@ -343,7 +343,7 @@ class Repo
       end
     end
     @destrepo = destrepo
-    @from_date = @destrepo.last_date.succ
+    @from_date = @destrepo.last_date + 1
 
     # Handling of repo surgery
     if filelist = @destrepo.filelist(:complete)
