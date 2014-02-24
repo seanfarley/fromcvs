@@ -3,9 +3,9 @@ From CVS to * in little time
 
 Prerequisites:
  - ruby (1.8.5 known working)
- - fromcvs, <http://ww2.fs.ei.tum.de/~corecode/hg/fromcvs>
- - rcsparse, <http://ww2.fs.ei.tum.de/~corecode/hg/rcsparse> (ruby module)
- - Ruby/RBTree, <http://raa.ruby-lang.org/project/ruby-rbtree/>
+ - fromcvs, <https://github.com/corecode/fromcvs>
+ - rcsparse, <https://github.com/corecode/rcsparse> (ruby module)
+ - Ruby/RBTree gem
  - for git: git-fast-import, part of git 1.5
  - for db/commitset: sqlite3 + sqlite3-ruby (available as gem)
 
@@ -29,6 +29,6 @@ branch-fixup	CVS repo conversion <flames@example.net>
 EOF
 
 That's about for the quickstart.  Be sure to report conversion errors or
-runtime issues (possibly due to obscure CVS repo activity) to me. 
+runtime issues (possibly due to obscure CVS repo activity) to me.
 
--- Simon 'corecode' Schubert <corecode@fs.ei.tum.de>
+-- Simon Schubert <2@0x2c.org>
