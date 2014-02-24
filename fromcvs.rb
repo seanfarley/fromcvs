@@ -496,7 +496,7 @@ class Repo
         # Check if there are multiple revs hitting one file, if so, split
         # the set in two parts.
         dups = []
-        set.ary.inject(Hash.new(0)) do |h, rev| 
+        set.ary.inject(Hash.new(0)) do |h, rev|
           # copy the first dup rev and then continue copying
           if h.include?(rev.file) or not dups.empty?
             dups << rev
@@ -657,7 +657,7 @@ class Repo
         # When committing revisions, we hold off branching (and record the
         # files) until we are about to change a file on the parent branch,
         # which should already exist in the child branch, or until we are about
-        # to commit the first revision to the child branch.  
+        # to commit the first revision to the child branch.
         # After this, we merge each branch revision to the branch until the
         # list is empty.
         #
@@ -1208,7 +1208,7 @@ class PrintDestRepo
   def filelist(branch)
     []
   end
-  
+
   def create_branch(branch, parent, vendor_p, date)
     if vendor_p
       puts "Creating vendor branch #{branch}"
@@ -1296,4 +1296,3 @@ if $0 == __FILE__
 end
 
 end   # module FromCVS
-
