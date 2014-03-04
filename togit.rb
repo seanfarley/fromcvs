@@ -94,11 +94,13 @@ class GitDestRepo
 
       files = _command(*(%w{git ls-tree --name-only --full-name -r -z} +
                          ["refs/heads/#{tag}"])).split("\0")
+
+      @files[tag] = {}
       files.collect! do |f|
-        _unquote(f)
+        f = _unquote(f)
+        @files[tag][f] = true
       end
 
-      @files[tag] = Hash[*files.map{|f| [f, true]}.flatten]
       files
     end
   end
