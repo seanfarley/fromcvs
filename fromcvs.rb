@@ -18,7 +18,6 @@ require 'rcsfile'
 require 'find'
 require 'digest/md5'
 require 'rbtree'
-require 'iconv'
 require 'getoptlong'
 
 require 'tagexpander'
@@ -878,7 +877,7 @@ class Repo
 
     encs.each do |enc|
       begin
-        return Iconv::conv('utf-8', enc, str)
+        return str.encode("UTF-8", enc, :invalid => :replace, :undef => :replace, :replace => "?")
       rescue StandardError
       end
     end
