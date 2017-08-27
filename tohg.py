@@ -1,18 +1,18 @@
 import sys
 import time
-import mercurial
 from mercurial import ui, localrepo, node
+
 
 class HgDestRepo:
     def __init__(self, ins, outs, hgroot):
         self.ins = ins
         self.outs = outs
-        self.ui = ui.ui(interactive = False)
+        self.ui = ui.ui(interactive=False)
         self.hgrepo = localrepo.localrepository(self.ui, hgroot)
         self.start()
         self.last_date()
         self.branchlist()
-    
+
     def start(self):
         self.wlock = self.hgrepo.wlock()
         self.transaction = self.hgrepo.transaction()
@@ -30,7 +30,8 @@ class HgDestRepo:
 
     def cmd_filelist(self, n):
         n = node.bin(n)
-        files = self.hgrepo.manifest.read(self.hgrepo.changelog.read(n)[0]).keys()
+        m = self.hgrepo.changelog.read(n)[0]
+        files = self.hgrepo.manifest.read(m).keys()
         for f in files:
             self.outs.write("%s\0" % f)
         self.outs.write("\0\n")
@@ -66,19 +67,20 @@ class HgDestRepo:
         textlen = int(self.ins.readline().strip())
         text = self.ins.read(textlen)
         if not self.ins.readline():   # eat newline after text
-            raise RuntimeError, 'bad input stream: invalid commit'
+            raise RuntimeError('bad input stream: invalid commit')
 
-        n = self.hgrepo.commit(files = files,
-                               text = text,
-                               user = user,
-                               date = "%s 0" % date,
-                               p1 = p1,
-                               p2 = p2,
-                               extra = {'branch': branch})
+        n = self.hgrepo.commit(files=files,
+                               text=text,
+                               user=user,
+                               date="%s 0" % date,
+                               p1=p1,
+                               p2=p2,
+                               extra={'branch': branch})
 
         if not n:
-            raise RuntimeError, "commit by %s at %s (%s) did not succeed" % \
-                    (user, time.asctime(time.gmtime(int(date))), ", ".join(files))
+            raise RuntimeError("commit by %s at %s (%s) did not succeed" %
+                               (user, time.asctime(time.gmtime(int(date))),
+                                ", ".join(files)))
 
         self.outs.write("%s\n" % node.hex(n))
         self.outs.flush()
@@ -94,7 +96,7 @@ class HgDestRepo:
             if not l:
                 break
             l = l.strip().split()
-            func = getattr(self, 'cmd_'+l[0])
+            func = getattr(self, 'cmd_' + l[0])
             func(*l[1:])
 
 if __name__ == '__main__':
