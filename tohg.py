@@ -1,6 +1,7 @@
+import os
 import sys
 import time
-from mercurial import ui, localrepo, node
+from mercurial import context, localrepo, node, ui
 
 
 class HgDestRepo:
@@ -67,13 +68,24 @@ class HgDestRepo:
         if not self.ins.readline():   # eat newline after text
             raise RuntimeError('bad input stream: invalid commit')
 
-        n = self.hgrepo.commit(files=files,
-                               text=text,
-                               user=user,
-                               date="%s 0" % date,
-                               p1=p1,
-                               p2=p2,
-                               extra={'branch': branch})
+        # TODO: add similarity renames
+        def getfilectx(repo, memctx, f):
+            fpath = os.path.join(repo.root, f)
+            data = None
+            try:
+                with open(fpath) as fp:
+                    data = fp.read()
+                return context.memfilectx(repo, f, data, os.path.islink(fpath),
+                                          os.access(fpath, os.X_OK))
+            except IOError:
+                return None
+
+        extra = {'branch': branch}
+        memctx = context.memctx(self.hgrepo, (p1, p2), text, set(files),
+                                getfilectx, user, "%s 0" % date, extra)
+
+        with self.hgrepo.transaction('fromcvs-commit'):
+            n = self.hgrepo.commitctx(memctx)
 
         if not n:
             raise RuntimeError("commit by %s at %s (%s) did not succeed" %
