@@ -39,8 +39,6 @@ class HgDestRepo:
         self.outs.flush()
 
     def cmd_flush(self):
-        # prevent updating the dirstate
-        self.hgrepo.dirstate.setparents(node.nullid)
         self.transaction.close()
         del self.transaction
         self.transaction = self.hgrepo.transaction('fromcvs')
