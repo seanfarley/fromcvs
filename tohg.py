@@ -78,7 +78,8 @@ class HgDestRepo:
                 return context.memfilectx(repo, f, data, os.path.islink(fpath),
                                           os.access(fpath, os.X_OK))
             except IOError:
-                return None
+                pass
+            return None
 
         extra = {'branch': branch}
         memctx = context.memctx(self.hgrepo, (p1, p2), text, set(files),
