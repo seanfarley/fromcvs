@@ -23,7 +23,7 @@ class HgDestRepo:
         self.outs.flush()
 
     def branchlist(self):
-        for br, n in self.hgrepo.branchtags().items():
+        for br, n in self.hgrepo.branchmap().iteritems():
             self.outs.write("%s %s\n" % (br, node.hex(n)))
         self.outs.write("\n")
         self.outs.flush()
