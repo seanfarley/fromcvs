@@ -7,7 +7,7 @@ class HgDestRepo:
     def __init__(self, ins, outs, hgroot):
         self.ins = ins
         self.outs = outs
-        self.ui = ui.ui(interactive=False)
+        self.ui = ui.ui()
         self.hgrepo = localrepo.localrepository(self.ui, hgroot)
         self.start()
         self.last_date()
