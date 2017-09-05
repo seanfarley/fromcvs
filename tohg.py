@@ -31,8 +31,7 @@ class HgDestRepo:
 
     def cmd_filelist(self, n):
         n = node.bin(n)
-        m = self.hgrepo.changelog.read(n)[0]
-        files = self.hgrepo.manifest.read(m).keys()
+        files = self.hgrepo[n].manifest().keys()
         for f in files:
             self.outs.write("%s\0" % f)
         self.outs.write("\0\n")
