@@ -15,7 +15,7 @@ class HgDestRepo:
 
     def start(self):
         self.wlock = self.hgrepo.wlock()
-        self.transaction = self.hgrepo.transaction()
+        self.transaction = self.hgrepo.transaction('fromcvs')
 
     def last_date(self):
         date = self.hgrepo.changelog.read(self.hgrepo.changelog.tip())[2][0]
@@ -43,7 +43,7 @@ class HgDestRepo:
         self.hgrepo.dirstate.setparents(node.nullid)
         self.transaction.close()
         del self.transaction
-        self.transaction = self.hgrepo.transaction()
+        self.transaction = self.hgrepo.transaction('fromcvs')
 
     def cmd_commit(self):
         user = self.ins.readline().strip()
