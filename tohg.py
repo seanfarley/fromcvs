@@ -1,7 +1,15 @@
 import os
 import sys
 import time
-from mercurial import context, localrepo, node, ui
+
+from mercurial import (
+    context,
+    localrepo,
+    match as matchmod,
+    node,
+    scmutil,
+    ui,
+)
 
 
 class HgDestRepo:
@@ -86,6 +94,23 @@ class HgDestRepo:
         extra = {'branch': branch}
         memctx = context.memctx(self.hgrepo, (p1, p2), text, set(files),
                                 getfilectx, user, "%s 0" % date, extra)
+
+        m = scmutil.match(self.hgrepo[None])
+
+        # copied from mercurial/scmutil.py::addremove
+        rejected = []
+        def badfn(f, msg):
+            if f in m.files():
+                m.bad(f, msg)
+            rejected.append(f)
+        badmatch = matchmod.badmatch(m, badfn)
+
+        if similarity > 0 and similarity <= 1.0:
+            st = scmutil._interestingfiles(self.hgrepo, badmatch)
+            added, unknown, deleted, removed, forgotten = st
+
+            renames.update(scmutil._findrenames(self.hgrepo, m, added + unknown,
+                                           removed + deleted, similarity))
 
         with self.hgrepo.transaction('fromcvs-commit'):
             n = self.hgrepo.commitctx(memctx)
