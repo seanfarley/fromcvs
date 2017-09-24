@@ -68,15 +68,17 @@ class HgDestRepo:
         if not self.ins.readline():   # eat newline after text
             raise RuntimeError('bad input stream: invalid commit')
 
-        # TODO: add similarity renames
+        similarity = 0 / 100.0         # arbitrary choice
+        renames = {}
         def getfilectx(repo, memctx, f):
             fpath = os.path.join(repo.root, f)
             data = None
             try:
                 with open(fpath) as fp:
                     data = fp.read()
-                return context.memfilectx(repo, f, data, os.path.islink(fpath),
-                                          os.access(fpath, os.X_OK))
+                return context.memfilectx(repo, f, data, bool(os.path.islink(fpath)),
+                                          bool(os.access(fpath, os.X_OK)),
+                                          renames.get(f))
             except IOError:
                 pass
             return None
