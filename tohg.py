@@ -112,6 +112,13 @@ class HgDestRepo:
             renames.update(scmutil._findrenames(self.hgrepo, m, added + unknown,
                                            removed + deleted, similarity))
 
+        if memctx.p1().node() == node.nullid and memctx.p2().node() != node.nullid:
+            # XXX: not sure this is correct; I believe this is what the script
+            # did before since it was using the working directory which
+            # probably inherited the previous p1, so we manually set p1 to
+            # p2.p1 if p1 is null
+            memctx._parents[0] = memctx.p2().p1()
+
         with self.hgrepo.transaction('fromcvs-commit'):
             n = self.hgrepo.commitctx(memctx)
 
