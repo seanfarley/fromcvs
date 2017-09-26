@@ -128,7 +128,12 @@ class HGDestRepo
     return if @branches.include? branch
 
     if vendor_p
-      node = '0'*40
+      parent ||= 'HEAD'
+      if @branches.key?(parent)
+        node = @branches[parent]
+      else
+        node = '0'*40
+      end
       text = "creating vendor branch #{branch}"
     else
       parent ||= 'HEAD'
