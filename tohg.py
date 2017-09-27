@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import sys
 import time
@@ -90,6 +91,15 @@ class HgDestRepo:
             except IOError:
                 pass
             return None
+
+        # fixup unicode (not a complete list; just what I've run into)
+        unicode_chars = {
+            '\xf8': 'ø',
+        }
+
+        for old, new in unicode_chars.iteritems():
+            user = user.replace(old, new)
+            text = text.replace(old, new)
 
         extra = {'branch': branch}
         memctx = context.memctx(self.hgrepo, (p1, p2), text, set(files),
